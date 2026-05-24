@@ -12,8 +12,9 @@ Scans your watchlist on 1H data and scores each ticker against all 25 checks.
 # 1. Install dependencies
 pip install -r requirements.txt
 
-# 2. Edit your watchlist
+# 2. Edit your watchlist/session state
 #    Open watchlist.py and update PORTFOLIO_STATE before each session
+#    Trading-rule defaults live in config.py
 
 # 3. Run the scanner
 python scanner.py
@@ -31,6 +32,12 @@ PORTFOLIO_STATE = {
     "fed_day":         False,  # True if FOMC today
     "tesla_catalyst":  False,  # True if Elon news / delivery day
     "position_size":   3000,   # your planned entry size
+
+    # hard risk gates
+    "max_total_deployed":      60000,
+    "max_open_positions":     2,
+    "max_stock_position":     10000,
+    "max_tsll_tslz_position": 6000,
 }
 ```
 
@@ -45,6 +52,9 @@ python scanner.py --alerts
 
 # Single ticker deep-dive
 python scanner.py --ticker TSLL
+
+# Explain blockers and score sections
+python scanner.py --ticker TSLL --explain
 
 # Verbose — show detail for every ticker
 python scanner.py --verbose
@@ -68,6 +78,26 @@ Mirrors your checklist exactly — 25 checks across 5 steps:
 - `✅ TAKE THE TRADE` — 16+ checks
 - `⚠️  REDUCE SIZE`   — 12–15 checks
 - `🚫 SKIP TRADE`     — < 12 checks
+
+Hard risk gates are evaluated before the score threshold. Earnings, Fed day,
+Tesla catalyst, open-position count, total deployed, and position cap failures
+force `SKIP` and are shown in the `WHY` column / `--explain` view.
+
+`--explain` also separates core setup, risk gates, and checklist score so you can
+see whether a ticker is technically clean but risk-blocked.
+
+---
+
+## Project structure
+
+| File | Purpose |
+|------|---------|
+| `scanner.py` | CLI display, filters, and `--explain` output |
+| `indicators.py` | Yahoo 1H data, FVG, Bollinger Bands, Stoch RSI, data quality |
+| `scoring.py` | Checklist scoring, hard blockers, and per-check reasons |
+| `config.py` | Strategy defaults, score thresholds, and risk-gate list |
+| `models.py` | Typed result contracts shared between modules |
+| `watchlist.py` | Tickers and current portfolio/session state |
 
 ---
 
