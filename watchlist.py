@@ -13,6 +13,85 @@ parent field (optional):
   Example: TSLL and TSLZ both have parent='TSLA'. If TSLA is in the list, they’re skipped.
 """
 
+import os
+import re
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+WATCHLIST_DIR = os.path.join(SCRIPT_DIR, "watchlists")
+
+UNSUPPORTED_PREFIXES = {"CRYPTOCAP"}
+SYMBOL_RE = re.compile(r"^[A-Z0-9.\-\^=]{1,20}$")
+
+EXPLICIT_SYMBOL_MAP = {
+    "CBOE:VIX": "^VIX",
+    "SP:SPX": "^GSPC",
+}
+
+EXCHANGE_PREFIXES = {"NASDAQ", "NYSE", "AMEX", "CBOE"}
+
+
+def tradingview_to_yahoo(token: str):
+    """Map a TradingView export token to a Yahoo-friendly ticker."""
+    token = token.strip().upper()
+    if not token:
+        return None, "empty symbol"
+
+    if token in EXPLICIT_SYMBOL_MAP:
+        return EXPLICIT_SYMBOL_MAP[token], None
+
+    if ":" not in token:
+        if not SYMBOL_RE.match(token):
+            return None, f"invalid characters in symbol: {token!r}"
+        return token.replace(".", "-"), None
+
+    prefix, symbol = token.split(":", 1)
+    if prefix in UNSUPPORTED_PREFIXES:
+        return None, f"{prefix} is not available from Yahoo-style feeds"
+    if prefix in EXCHANGE_PREFIXES:
+        if not SYMBOL_RE.match(symbol):
+            return None, f"invalid characters in symbol: {symbol!r}"
+        return symbol.replace(".", "-"), None
+
+    return None, f"no mapper for {prefix}:{symbol}"
+
+
+def _tokens_from_file(path: str):
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Watchlist file not found: {path}")
+    raw = ",".join(line.split("#", 1)[0] for line in lines)
+    return [t.strip() for t in raw.split(",") if t.strip()]
+
+
+def resolve_watchlist_path(name_or_path: str) -> str:
+    if os.path.isabs(name_or_path) or os.path.exists(name_or_path):
+        return name_or_path
+    filename = name_or_path if name_or_path.endswith(".txt") else f"{name_or_path}.txt"
+    return os.path.join(WATCHLIST_DIR, filename)
+
+
+def load_watchlist_file(path: str):
+    """Load a comma/newline separated watchlist file."""
+    entries, skipped, seen = [], [], set()
+    default_metadata = {
+        entry['ticker']: {k: v for k, v in entry.items() if k != 'ticker'}
+        for entry in WATCHLIST
+    }
+    for token in _tokens_from_file(path):
+        ticker, reason = tradingview_to_yahoo(token)
+        if not ticker:
+            skipped.append({"symbol": token, "reason": reason})
+            continue
+        if ticker in seen:
+            continue
+        entry = {"ticker": ticker, "type": "stock", "source": token.strip().upper()}
+        entry.update(default_metadata.get(ticker, {}))
+        entries.append(entry)
+        seen.add(ticker)
+    return entries, skipped
+
 # ── Your watchlist ────────────────────────────────────────────────────────────
 # Add or remove tickers freely. Scanner will pull 1H data for each.
 

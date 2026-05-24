@@ -5,11 +5,13 @@ Usage:
   python3 scanner.py              # full watchlist scan
   python3 scanner.py --alerts     # only TAKE THE TRADE setups
   python3 scanner.py --ticker TSLL
+  python3 scanner.py --watchlist swing
   python3 scanner.py --explain    # show blockers and score breakdown
+  python3 scanner.py --json       # machine-readable scan payload
   python3 scanner.py --verbose    # detail for every ticker
 """
 
-import argparse, sys
+import argparse, json, sys
 from datetime import datetime
 from rich.console import Console
 from rich.table import Table
@@ -19,7 +21,7 @@ from rich.columns import Columns
 from rich.rule import Rule
 from rich import box
 
-from watchlist import WATCHLIST, PORTFOLIO_STATE
+from watchlist import WATCHLIST, PORTFOLIO_STATE, load_watchlist_file, resolve_watchlist_path
 from indicators import fetch_and_analyze
 from scoring import score_signals
 
@@ -111,17 +113,18 @@ def print_results_table(results):
         header_style="bold white",
         show_lines=False,
         pad_edge=False,
+        expand=True,
     )
 
-    t.add_column("TICKER",    style="bold", width=10)
-    t.add_column("DIR",       width=10)
-    t.add_column("FVG",       width=6,  justify="center")
-    t.add_column("BB",        width=6,  justify="center")
-    t.add_column("STOCH",     width=8,  justify="center")
-    t.add_column("SCORE",     width=8,  justify="center")
-    t.add_column("CLOSE",     width=10, justify="right")
-    t.add_column("VERDICT",   width=16)
-    t.add_column("WHY",       width=32)
+    t.add_column("TICKER",    style="bold", width=8, no_wrap=True)
+    t.add_column("DIR",       width=10, no_wrap=True)
+    t.add_column("FVG",       width=5,  justify="center", no_wrap=True)
+    t.add_column("BB",        width=5,  justify="center", no_wrap=True)
+    t.add_column("STOCH",     width=7,  justify="center", no_wrap=True)
+    t.add_column("SCORE",     width=7,  justify="center", no_wrap=True)
+    t.add_column("CLOSE",     width=10, justify="right", no_wrap=True)
+    t.add_column("VERDICT",   width=16, no_wrap=True)
+    t.add_column("WHY",       min_width=20, ratio=1, overflow="fold")
 
     for r in results:
         pd   = r.get('price_data') or {}
@@ -156,7 +159,7 @@ def print_results_table(results):
 
 # ── Detail panel for a single ticker ─────────────────────────────────────────
 
-def print_detail(r):
+def print_detail(r, show_all_checks=False):
     c  = r['checks']
     pd = r.get('price_data') or {}
     vstyle, vlabel = VERDICT_STYLE.get(r['verdict'], ("white", r['verdict']))
@@ -254,8 +257,12 @@ def print_detail(r):
     if failed_checks:
         console.print()
         console.print("  [dim]Failed checks[/dim]")
-        for item in failed_checks[:6]:
+        visible_checks = failed_checks if show_all_checks else failed_checks[:6]
+        for item in visible_checks:
             console.print(f"  [red]•[/red] {item['label']}")
+        hidden_count = len(failed_checks) - len(visible_checks)
+        if hidden_count:
+            console.print(f"  [dim]+ {hidden_count} more; run with --explain to show all[/dim]")
     console.print()
     console.print("  [dim]Step 2 — Setup          Step 5 — Final Gate[/dim]")
     console.print(chk)
@@ -288,35 +295,59 @@ def print_summary(results):
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-def run_scan(tickers=None, alerts_only=False, verbose=False, explain=False):
-    print_header()
-    print_portfolio(PORTFOLIO_STATE)
-
-    # Build the raw scan list from arg or full watchlist
+def build_scan_entries(tickers=None, watchlist_entries=None, file_skipped=None):
+    file_skipped = file_skipped or []
     if tickers:
-        scan_entries = [w for w in WATCHLIST if w['ticker'] in tickers] or \
+        base = watchlist_entries if watchlist_entries is not None else WATCHLIST
+        scan_entries = [w for w in base if w['ticker'] in tickers] or \
                        [{'ticker': t, 'type': 'stock'} for t in tickers]
     else:
-        scan_entries = list(WATCHLIST)
+        scan_entries = list(watchlist_entries if watchlist_entries is not None else WATCHLIST)
 
-    # Skip any derivative (ETF) whose parent stock is also in the scan list
     all_tickers_in_scan = {e['ticker'] for e in scan_entries}
-    skipped = []
+    skipped = list(file_skipped)
     filtered_entries = []
     for entry in scan_entries:
         parent = entry.get('parent')
         if parent and parent in all_tickers_in_scan:
-            skipped.append((entry['ticker'], parent))
+            skipped.append({
+                'symbol': entry['ticker'],
+                'reason': f"Skipped because parent {parent} is in watchlist",
+            })
         else:
             filtered_entries.append(entry)
+    return filtered_entries, skipped
+
+
+def load_requested_watchlist(watchlist_name=None):
+    if not watchlist_name:
+        return list(WATCHLIST), []
+    path = resolve_watchlist_path(watchlist_name)
+    return load_watchlist_file(path)
+
+
+def run_scan(tickers=None, alerts_only=False, verbose=False, explain=False, watchlist_name=None, output_json=False):
+    watchlist_entries, file_skipped = load_requested_watchlist(watchlist_name)
+    filtered_entries, skipped = build_scan_entries(
+        tickers=tickers,
+        watchlist_entries=watchlist_entries,
+        file_skipped=file_skipped,
+    )
+
+    if not output_json:
+        print_header()
+        print_portfolio(PORTFOLIO_STATE)
 
     if skipped:
-        for etf, parent in skipped:
-            console.print(f"  [dim]SKIPPED  {etf:<10} (parent {parent} is in watchlist)[/dim]")
-        console.print()
+        for item in skipped:
+            if not output_json:
+                console.print(f"  [dim]SKIPPED  {item['symbol']:<10} ({item['reason']})[/dim]")
+        if not output_json:
+            console.print()
 
     results, errors = [], []
-    console.print(f"  [dim]Scanning {len(filtered_entries)} ticker(s) on 1H data…[/dim]\n")
+    if not output_json:
+        console.print(f"  [dim]Scanning {len(filtered_entries)} ticker(s) on 1H data…[/dim]\n")
 
     for entry in filtered_entries:
         ticker = entry['ticker']
@@ -327,10 +358,22 @@ def run_scan(tickers=None, alerts_only=False, verbose=False, explain=False):
             result['price_data'] = signals.get('price_data')
             results.append(result)
             vstyle, vlabel = VERDICT_STYLE.get(result['verdict'], ("white", result['verdict']))
-            console.print(f"  [{vstyle}]{vlabel:<18}[/{vstyle}]  [bold]{ticker}[/bold]")
+            if not output_json:
+                console.print(f"  [{vstyle}]{vlabel:<18}[/{vstyle}]  [bold]{ticker}[/bold]")
         except Exception as e:
             errors.append((ticker, str(e)))
-            console.print(f"  [dim]ERROR        [/dim]  {ticker}  [dim red]{e}[/dim red]")
+            if not output_json:
+                console.print(f"  [dim]ERROR        [/dim]  {ticker}  [dim red]{e}[/dim red]")
+
+    payload = {
+        'results': results,
+        'errors': [{'ticker': t, 'error': e} for t, e in errors],
+        'skipped': skipped,
+    }
+
+    if output_json:
+        print(json.dumps(payload, indent=2))
+        return payload
 
     console.print()
     console.rule(style="dim")
@@ -340,7 +383,7 @@ def run_scan(tickers=None, alerts_only=False, verbose=False, explain=False):
 
     if not display:
         console.print("  [yellow]No setups matched filters right now.[/yellow]\n")
-        return
+        return payload
 
     print_results_table(display)
     console.print()
@@ -349,7 +392,7 @@ def run_scan(tickers=None, alerts_only=False, verbose=False, explain=False):
     # Detail for TAKE + REDUCE, or all if verbose/explain
     for r in display:
         if verbose or explain or r['verdict'] in ('TAKE', 'REDUCE'):
-            print_detail(r)
+            print_detail(r, show_all_checks=verbose or explain)
 
     if errors:
         console.rule("[dim]Fetch Errors[/dim]", style="dim red")
@@ -357,17 +400,28 @@ def run_scan(tickers=None, alerts_only=False, verbose=False, explain=False):
             console.print(f"  [dim red]{t}[/dim red]: {e}")
         console.print()
 
+    return payload
+
 
 def main():
     p = argparse.ArgumentParser(description="Luminous Path Pre-Trade Scanner")
     p.add_argument('--alerts',  action='store_true', help='Only show TAKE setups')
     p.add_argument('--ticker',  type=str, help='Single ticker, e.g. --ticker TSLL')
+    p.add_argument('--watchlist', type=str, help='Watchlist file path or name under watchlists/')
     p.add_argument('--explain', action='store_true', help='Show blockers and score breakdown')
+    p.add_argument('--json',    action='store_true', help='Print machine-readable JSON')
     p.add_argument('--verbose', action='store_true', help='Detail for every ticker')
     args = p.parse_args()
 
     tickers = [args.ticker.upper()] if args.ticker else None
-    run_scan(tickers=tickers, alerts_only=args.alerts, verbose=args.verbose, explain=args.explain)
+    run_scan(
+        tickers=tickers,
+        alerts_only=args.alerts,
+        verbose=args.verbose,
+        explain=args.explain,
+        watchlist_name=args.watchlist,
+        output_json=args.json,
+    )
 
 
 if __name__ == "__main__":
