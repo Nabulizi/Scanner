@@ -13,12 +13,13 @@ Usage:
 
 import argparse, json, os, sys
 from datetime import datetime
-from rich.console import Console
+from rich.console import Console, Group
 from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
 from rich.columns import Columns
 from rich.rule import Rule
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
 from rich import box
 
 from watchlist import WATCHLIST, PORTFOLIO_STATE, load_watchlist_file, resolve_watchlist_path, DEFAULT_WATCHLIST_FILE
@@ -78,12 +79,12 @@ def print_header():
 # ── Portfolio state panel ─────────────────────────────────────────────────────
 
 def print_portfolio(portfolio):
-    deployed   = portfolio.get('total_deployed', 0)
-    open_pos   = portfolio.get('open_positions', 0)
-    fed        = portfolio.get('fed_day', False)
-    tesla_news = portfolio.get('tesla_catalyst', False)
-    pos_size   = portfolio.get('position_size', 3000)
-    max_deployed = portfolio.get('max_total_deployed', 60_000)
+    deployed      = portfolio.get('total_deployed', 0)
+    open_pos      = portfolio.get('open_positions', 0)
+    fed           = portfolio.get('fed_day', False)
+    tesla_news    = portfolio.get('tesla_catalyst', False)
+    pos_size      = portfolio.get('position_size', 3000)
+    max_deployed  = portfolio.get('max_total_deployed', 60_000)
     max_positions = portfolio.get('max_open_positions', 2)
 
     flags = []
@@ -94,13 +95,13 @@ def print_portfolio(portfolio):
     t = Table.grid(padding=(0, 3))
     t.add_column(style="dim")
     t.add_column()
-    t.add_row("Capital deployed",  f"[bold]${deployed:,.0f}[/bold]")
-    t.add_row("Open positions",    f"[bold]{open_pos}[/bold]")
-    t.add_row("Entry size",        f"[bold]${pos_size:,.0f}[/bold]")
-    t.add_row("Risk limits",       f"[bold]${max_deployed:,.0f}[/bold] deployed · [bold]{max_positions}[/bold] positions")
-    t.add_row("Alerts",            "  ".join(flags))
+    t.add_row("Capital deployed", f"[bold]${deployed:,.0f}[/bold]")
+    t.add_row("Open positions",   f"[bold]{open_pos}[/bold]")
+    t.add_row("Entry size",       f"[bold]${pos_size:,.0f}[/bold]")
+    t.add_row("Risk limits",      f"[bold]${max_deployed:,.0f}[/bold] deployed · [bold]{max_positions}[/bold] positions")
+    t.add_row("Alerts",           "  ".join(flags))
 
-    console.print(Panel(t, title="[bold]Portfolio State[/bold]", border_style="dim", padding=(0,1)))
+    console.print(Panel(t, title="[bold]Portfolio State[/bold]", border_style="dim", padding=(0, 1)))
     console.print()
 
 
@@ -116,18 +117,19 @@ def print_results_table(results):
         expand=True,
     )
 
-    t.add_column("TICKER",    style="bold", width=8, no_wrap=True)
-    t.add_column("DIR",       width=10, no_wrap=True)
-    t.add_column("FVG",       width=5,  justify="center", no_wrap=True)
-    t.add_column("BB",        width=5,  justify="center", no_wrap=True)
-    t.add_column("STOCH",     width=7,  justify="center", no_wrap=True)
-    t.add_column("SCORE",     width=7,  justify="center", no_wrap=True)
-    t.add_column("CLOSE",     width=10, justify="right", no_wrap=True)
-    t.add_column("VERDICT",   width=16, no_wrap=True)
-    t.add_column("WHY",       min_width=20, ratio=1, overflow="fold")
+    t.add_column("TICKER",  style="bold", width=8,  no_wrap=True)
+    t.add_column("DIR",     width=10, no_wrap=True)
+    t.add_column("FVG",     width=5,  justify="center", no_wrap=True)
+    t.add_column("BB",      width=5,  justify="center", no_wrap=True)
+    t.add_column("STOCH",   width=7,  justify="center", no_wrap=True)
+    t.add_column("SCORE",   width=7,  justify="center", no_wrap=True)
+    t.add_column("CLOSE",   width=10, justify="right",  no_wrap=True)
+    t.add_column("VERDICT", width=16, no_wrap=True)
+    # Fix 5: ellipsis keeps WHY to one clean line instead of wrapping mid-word
+    t.add_column("WHY",     min_width=20, ratio=1, overflow="ellipsis", no_wrap=True)
 
     for r in results:
-        pd   = r.get('price_data') or {}
+        pd     = r.get('price_data') or {}
         vstyle, vlabel = VERDICT_STYLE.get(r['verdict'], ("white", r['verdict']))
         dstyle, dlabel = DIR_STYLE.get(r['direction'], ("white", r['direction'].upper()))
 
@@ -160,46 +162,89 @@ def print_results_table(results):
 # ── Detail panel for a single ticker ─────────────────────────────────────────
 
 def print_detail(r, show_all_checks=False):
-    c  = r['checks']
-    pd = r.get('price_data') or {}
+    c        = r['checks']
+    pd       = r.get('price_data') or {}
     vstyle, vlabel = VERDICT_STYLE.get(r['verdict'], ("white", r['verdict']))
     dstyle, dlabel = DIR_STYLE.get(r['direction'], ("white", r['direction'].upper()))
-    fvg = r.get('fvg_detail', {})
+    fvg      = r.get('fvg_detail', {})
     sections = r.get('score_sections') or {}
 
-    # ── Price strip ───────────────────────────────────────────────────────────
-    price_row = Table.grid(padding=(0, 4))
-    price_row.add_column(); price_row.add_column(); price_row.add_column(); price_row.add_column()
-    price_row.add_row(
-        f"[dim]Price[/dim]  [bold]${pd.get('close',0):.4f}[/bold]",
-        f"[dim]BB lower[/dim]  [cyan]{pd.get('bb_lower',0):.4f}[/cyan]",
-        f"[dim]BB upper[/dim]  [cyan]{pd.get('bb_upper',0):.4f}[/cyan]",
-        f"[dim]Stoch K[/dim]  [bold]{pd.get('stoch_k',0):.1f}[/bold]",
+    score_pct   = r['score'] / r['total']
+    bar_filled  = round(score_pct * 20)
+    score_color = 'green' if score_pct >= 0.75 else 'yellow' if score_pct >= 0.5 else 'red'
+
+    # Fix 2: one labeled row per field instead of cramming onto two lines
+    meta = Table.grid(padding=(0, 3))
+    meta.add_column(style="dim", width=12)
+    meta.add_column()
+
+    score_text = Text()
+    score_text.append(
+        "[" + "█" * bar_filled + "░" * (20 - bar_filled) + f"]  {r['score']}/{r['total']}",
+        style=score_color,
     )
 
-    # ── Signal grid ───────────────────────────────────────────────────────────
+    meta.add_row("Direction", Text(dlabel, style=dstyle))
+    meta.add_row("Score",     score_text)
+    meta.add_row(
+        "Sections",
+        f"Core [bold]{sections.get('core_setup', '—')}[/bold]   "
+        f"Risk [bold]{sections.get('risk_gates', '—')}[/bold]   "
+        f"Checklist [bold]{sections.get('checklist', '—')}[/bold]",
+    )
+
+    # Core signals row
     sig = Table.grid(padding=(0, 3))
     sig.add_column(width=22); sig.add_column(width=22); sig.add_column(width=22)
     sig.add_row(
-        signal_cell(r['has_fvg'],   "FVG present",   "No FVG"),
-        signal_cell(r['has_bb'],    "BB confirmed",  "No BB touch"),
-        signal_cell(r['has_stoch'], "Stoch cross",   "No Stoch cross"),
+        signal_cell(r['has_fvg'],   "FVG present",  "No FVG"),
+        signal_cell(r['has_bb'],    "BB confirmed", "No BB touch"),
+        signal_cell(r['has_stoch'], "Stoch cross",  "No Stoch cross"),
     )
 
-    # ── FVG zone detail ───────────────────────────────────────────────────────
-    fvg_lines = []
-    if fvg.get('bullish'):
-        b = fvg['bullish']
-        inside = " [green][INSIDE][/green]" if b.get('price_inside') else ""
-        fvg_lines.append(f"  [green]Bullish FVG[/green]  ${b['gap_bottom']} – ${b['gap_top']}  ({b['gap_size_pct']}%){inside}")
-    if fvg.get('bearish'):
-        b = fvg['bearish']
-        inside = " [red][INSIDE][/red]" if b.get('price_inside') else ""
-        fvg_lines.append(f"  [red]Bearish FVG[/red]   ${b['gap_bottom']} – ${b['gap_top']}  ({b['gap_size_pct']}%){inside}")
+    # FVG zone detail
+    fvg_renderables = []
+    for kind in ('bullish', 'bearish'):
+        z = fvg.get(kind)
+        if z:
+            color = "green" if kind == 'bullish' else "red"
+            label = "Bullish FVG" if kind == 'bullish' else "Bearish FVG"
+            line = Text()
+            line.append(f"  {label}  ", style=color)
+            line.append(f"${z['gap_bottom']} – ${z['gap_top']}  ({z['gap_size_pct']}%)")
+            if z.get('price_inside'):
+                line.append("  INSIDE", style=f"{color} bold")
+            fvg_renderables.append(line)
 
-    # ── Checklist mini-table ──────────────────────────────────────────────────
-    chk = Table.grid(padding=(0, 2))
-    chk.add_column(width=28); chk.add_column(width=28)
+    # Blocker reasons
+    blocker_renderables = []
+    if r.get('blocker_reasons'):
+        blocker_renderables.append(Text("  Why", style="dim"))
+        for reason in r['blocker_reasons']:
+            line = Text()
+            line.append("  • ", style="red")
+            line.append(reason)
+            blocker_renderables.append(line)
+
+    # Failed checks
+    failed_checks = [item for item in r.get('check_reasons', []) if not item.get('passed')]
+    check_renderables = []
+    if failed_checks:
+        check_renderables.append(Text("  Failed checks", style="dim"))
+        visible = failed_checks if show_all_checks else failed_checks[:6]
+        for item in visible:
+            line = Text()
+            line.append("  • ", style="red")
+            line.append(item['label'])
+            check_renderables.append(line)
+        hidden = len(failed_checks) - len(visible)
+        if hidden:
+            check_renderables.append(Text(f"  + {hidden} more  (run --explain to show all)", style="dim"))
+
+    # Fix 3: proper Table with column headers so they actually align with the data
+    chk = Table(box=None, show_header=True, header_style="dim", pad_edge=False, show_lines=False)
+    chk.add_column("Step 2 — Setup",      width=28)
+    chk.add_column("Step 5 — Final Gate", width=28)
 
     step2_keys = [
         ('fvg_identified',      'FVG identified'),
@@ -216,61 +261,50 @@ def print_detail(r, show_all_checks=False):
         ('final_bias',    'Final: Bias aligned'),
         ('final_no_news', 'Final: No catalyst'),
     ]
-    pairs = list(zip(step2_keys, step5_keys + [('','')]))
-    for (k2, l2), (k5, l5) in pairs:
+    for (k2, l2), (k5, l5) in zip(step2_keys, step5_keys + [('', '')]):
         left  = Text(f"{'✔' if c.get(k2) else '✘'}  {l2}", style="green" if c.get(k2) else "dim red")
         right = Text(f"{'✔' if c.get(k5) else '✘'}  {l5}", style="green" if c.get(k5) else "dim red") if k5 else Text("")
         chk.add_row(left, right)
 
-    # ── Assemble panel ────────────────────────────────────────────────────────
+    # Price data strip
+    price_row = Table.grid(padding=(0, 4))
+    price_row.add_column(); price_row.add_column(); price_row.add_column(); price_row.add_column()
+    price_row.add_row(
+        f"[dim]Price[/dim]  [bold]${pd.get('close', 0):.4f}[/bold]",
+        f"[dim]BB lower[/dim]  [cyan]{pd.get('bb_lower', 0):.4f}[/cyan]",
+        f"[dim]BB upper[/dim]  [cyan]{pd.get('bb_upper', 0):.4f}[/cyan]",
+        f"[dim]Stoch K[/dim]  [bold]{pd.get('stoch_k', 0):.1f}[/bold]",
+    )
 
+    # Fix 1: everything inside one Panel via Group — no more floating content below the box
+    body = [
+        Text(""),
+        meta,
+        Text(""),
+        Text("  Core Signals", style="bold dim"),
+        Text(""),
+        sig,
+        *fvg_renderables,
+        *([Text("")] if blocker_renderables else []),
+        *blocker_renderables,
+        *([Text("")] if check_renderables else []),
+        *check_renderables,
+        Text(""),
+        Text("  Checklist", style="bold dim"),
+        chk,
+        Text(""),
+        Text("  Price Data", style="dim"),
+        price_row,
+        Text(""),
+    ]
 
-    score_pct = r['score'] / r['total']
-    bar_filled = round(score_pct * 20)
-    bar = "[" + "█" * bar_filled + "░" * (20 - bar_filled) + f"]  {r['score']}/{r['total']}"
-
+    border_color = vstyle.split()[1] if ' ' in vstyle else vstyle
     console.print(Panel(
-        "\n".join([
-            "",
-            f"  [dim]Direction[/dim]  [{dstyle}]{dlabel}[/{dstyle}]          [dim]Score[/dim]  [{('green' if score_pct>=0.75 else 'yellow' if score_pct>=0.5 else 'red')}]{bar}[/]",
-            f"  [dim]Core[/dim]  {sections.get('core_setup', '—')}          [dim]Risk[/dim]  {sections.get('risk_gates', '—')}          [dim]Checklist[/dim]  {sections.get('checklist', '—')}",
-            "",
-            "  [bold dim]─── Core Signals ────────────────────────────────[/bold dim]",
-            "",
-        ]),
+        Group(*body),
         title=f"[bold]{r['ticker']}[/bold]  [{vstyle}]{vlabel}[/]",
-        border_style=vstyle.split()[1] if ' ' in vstyle else vstyle,
+        border_style=border_color,
         padding=(0, 1),
     ))
-
-    # Print sub-content outside panel for cleaner layout
-    console.print(sig)
-    if fvg_lines:
-        for line in fvg_lines:
-            console.print(line)
-    if r.get('blocker_reasons'):
-        console.print()
-        console.print("  [dim]Why[/dim]")
-        for reason in r['blocker_reasons']:
-            console.print(f"  [red]•[/red] {reason}")
-    failed_checks = [item for item in r.get('check_reasons', []) if not item.get('passed')]
-    if failed_checks:
-        console.print()
-        console.print("  [dim]Failed checks[/dim]")
-        visible_checks = failed_checks if show_all_checks else failed_checks[:6]
-        for item in visible_checks:
-            console.print(f"  [red]•[/red] {item['label']}")
-        hidden_count = len(failed_checks) - len(visible_checks)
-        if hidden_count:
-            console.print(f"  [dim]+ {hidden_count} more; run with --explain to show all[/dim]")
-    console.print()
-    console.print("  [dim]Step 2 — Setup          Step 5 — Final Gate[/dim]")
-    console.print(chk)
-    console.print()
-    console.print("  [dim]Price data[/dim]")
-    console.print(price_row)
-    console.print()
-    console.rule(style="dim")
     console.print()
 
 
@@ -350,24 +384,45 @@ def run_scan(tickers=None, alerts_only=False, verbose=False, explain=False, watc
             console.print()
 
     results, errors = [], []
-    if not output_json:
-        console.print(f"  [dim]Scanning {len(filtered_entries)} ticker(s) on 1H data…[/dim]\n")
 
-    for entry in filtered_entries:
-        ticker = entry['ticker']
-        itype  = entry.get('type', 'stock')
-        try:
-            signals = fetch_and_analyze(ticker)
-            result  = score_signals(ticker, signals, PORTFOLIO_STATE, itype)
-            result['price_data'] = signals.get('price_data')
-            results.append(result)
-            vstyle, vlabel = VERDICT_STYLE.get(result['verdict'], ("white", result['verdict']))
-            if not output_json:
-                console.print(f"  [{vstyle}]{vlabel:<18}[/{vstyle}]  [bold]{ticker}[/bold]")
-        except Exception as e:
-            errors.append((ticker, str(e)))
-            if not output_json:
-                console.print(f"  [dim]ERROR        [/dim]  {ticker}  [dim red]{e}[/dim red]")
+    if output_json:
+        # JSON mode: no UI, plain loop
+        for entry in filtered_entries:
+            ticker = entry['ticker']
+            itype  = entry.get('type', 'stock')
+            try:
+                signals = fetch_and_analyze(ticker)
+                result  = score_signals(ticker, signals, PORTFOLIO_STATE, itype)
+                result['price_data'] = signals.get('price_data')
+                results.append(result)
+            except Exception as e:
+                errors.append((ticker, str(e)))
+    else:
+        # Fix 6: Progress bar clears itself (transient=True) before results print
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            console=console,
+            transient=True,
+        ) as progress:
+            task = progress.add_task(
+                f"[dim]Scanning {len(filtered_entries)} ticker(s) on 1H data…[/dim]",
+                total=len(filtered_entries),
+            )
+            for entry in filtered_entries:
+                ticker = entry['ticker']
+                itype  = entry.get('type', 'stock')
+                progress.update(task, description=f"[dim]Fetching[/dim] [bold]{ticker}[/bold]")
+                try:
+                    signals = fetch_and_analyze(ticker)
+                    result  = score_signals(ticker, signals, PORTFOLIO_STATE, itype)
+                    result['price_data'] = signals.get('price_data')
+                    results.append(result)
+                except Exception as e:
+                    errors.append((ticker, str(e)))
+                progress.advance(task)
 
     payload = {
         'results': results,
@@ -393,9 +448,22 @@ def run_scan(tickers=None, alerts_only=False, verbose=False, explain=False, watc
     console.print()
     print_summary(results)
 
-    # Detail for TAKE + REDUCE, or all if verbose/explain
-    for r in display:
-        if verbose or explain or r['verdict'] in ('TAKE', 'REDUCE'):
+    # Fix 4: detail panels grouped by verdict with labeled section dividers
+    verdict_groups = [
+        ('TAKE',   '✅ TAKE TRADES',  'green'),
+        ('REDUCE', '⚠  REDUCE SIZE', 'yellow'),
+        ('SKIP',   '✖  SKIPPED',     'dim'),
+    ]
+    for verdict, label, color in verdict_groups:
+        group = [r for r in display if r['verdict'] == verdict]
+        if not group:
+            continue
+        show_detail = verbose or explain or verdict in ('TAKE', 'REDUCE')
+        if not show_detail:
+            continue
+        console.rule(f"[{color}]{label}  ({len(group)})[/]", style=color)
+        console.print()
+        for r in group:
             print_detail(r, show_all_checks=verbose or explain)
 
     if errors:
@@ -409,12 +477,12 @@ def run_scan(tickers=None, alerts_only=False, verbose=False, explain=False, watc
 
 def main():
     p = argparse.ArgumentParser(description="Luminous Path Pre-Trade Scanner")
-    p.add_argument('--alerts',  action='store_true', help='Only show TAKE setups')
-    p.add_argument('--ticker',  type=str, help='Single ticker, e.g. --ticker TSLL')
+    p.add_argument('--alerts',    action='store_true', help='Only show TAKE setups')
+    p.add_argument('--ticker',    type=str, help='Single ticker, e.g. --ticker TSLL')
     p.add_argument('--watchlist', type=str, help='Watchlist file path or name under watchlists/')
-    p.add_argument('--explain', action='store_true', help='Show blockers and score breakdown')
-    p.add_argument('--json',    action='store_true', help='Print machine-readable JSON')
-    p.add_argument('--verbose', action='store_true', help='Detail for every ticker')
+    p.add_argument('--explain',   action='store_true', help='Show blockers and score breakdown')
+    p.add_argument('--json',      action='store_true', help='Print machine-readable JSON')
+    p.add_argument('--verbose',   action='store_true', help='Detail for every ticker')
     args = p.parse_args()
 
     tickers = [args.ticker.upper()] if args.ticker else None
