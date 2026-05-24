@@ -12,8 +12,9 @@ Scans your watchlist on 1H data and scores each ticker against all 25 checks.
 # 1. Install dependencies
 pip install -r requirements.txt
 
-# 2. Edit your watchlist
+# 2. Edit your watchlist/session state
 #    Open watchlist.py and update PORTFOLIO_STATE before each session
+#    Trading-rule defaults live in config.py
 
 # 3. Run the scanner
 python scanner.py
@@ -81,6 +82,22 @@ Mirrors your checklist exactly — 25 checks across 5 steps:
 Hard risk gates are evaluated before the score threshold. Earnings, Fed day,
 Tesla catalyst, open-position count, total deployed, and position cap failures
 force `SKIP` and are shown in the `WHY` column / `--explain` view.
+
+`--explain` also separates core setup, risk gates, and checklist score so you can
+see whether a ticker is technically clean but risk-blocked.
+
+---
+
+## Project structure
+
+| File | Purpose |
+|------|---------|
+| `scanner.py` | CLI display, filters, and `--explain` output |
+| `indicators.py` | Yahoo 1H data, FVG, Bollinger Bands, Stoch RSI, data quality |
+| `scoring.py` | Checklist scoring, hard blockers, and per-check reasons |
+| `config.py` | Strategy defaults, score thresholds, and risk-gate list |
+| `models.py` | Typed result contracts shared between modules |
+| `watchlist.py` | Tickers and current portfolio/session state |
 
 ---
 

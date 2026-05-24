@@ -250,6 +250,12 @@ def print_detail(r):
         console.print("  [dim]Why[/dim]")
         for reason in r['blocker_reasons']:
             console.print(f"  [red]•[/red] {reason}")
+    failed_checks = [item for item in r.get('check_reasons', []) if not item.get('passed')]
+    if failed_checks:
+        console.print()
+        console.print("  [dim]Failed checks[/dim]")
+        for item in failed_checks[:6]:
+            console.print(f"  [red]•[/red] {item['label']}")
     console.print()
     console.print("  [dim]Step 2 — Setup          Step 5 — Final Gate[/dim]")
     console.print(chk)

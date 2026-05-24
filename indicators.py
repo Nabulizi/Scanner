@@ -15,6 +15,8 @@ import pandas as pd
 import ta
 from datetime import date
 
+from models import SignalResult
+
 
 # ── Configuration (matches your checklist) ───────────────────────────────────
 
@@ -239,7 +241,7 @@ def infer_direction(last_row: pd.Series, fvg: dict) -> str:
 
 # ── Main public function ──────────────────────────────────────────────────────
 
-def fetch_and_analyze(ticker: str) -> dict:
+def fetch_and_analyze(ticker: str) -> SignalResult:
     """
     Fetch 1H data for ticker, run all indicators, return signal dict.
     This dict is fed directly into scoring.score_signals().
@@ -248,6 +250,12 @@ def fetch_and_analyze(ticker: str) -> dict:
     has no calendar data the field silently defaults to False.
     """
     df            = fetch_ohlcv(ticker)
+    data_quality  = {
+        'valid': True,
+        'bars_returned': len(df),
+        'required_bars': BB_WINDOW + 10,
+        'warnings': [],
+    }
     df            = calc_bollinger(df)
     df            = calc_stoch_rsi(df)
     fvg           = detect_fvg(df)
@@ -286,6 +294,7 @@ def fetch_and_analyze(ticker: str) -> dict:
         # earnings_soon: auto-detected from Yahoo Finance calendar
         # fed_day / tesla_catalyst: set manually in watchlist.py PORTFOLIO_STATE
         'earnings_soon':       earnings_soon,
+        'data_quality':        data_quality,
         'fed_day':             False,
         'tesla_catalyst':      False,
         # These are session-level manual confirmations — passed in via PORTFOLIO_STATE

@@ -13,7 +13,37 @@ Verdict logic (fixed):
   🚫 SKIP TRADE      — fewer than 2 core signals or score < 12
 """
 
-from strategy_rules import DEFAULT_RULES, TAKE_THRESHOLD, REDUCE_THRESHOLD
+from config import DEFAULT_RULES, REDUCE_THRESHOLD, RISK_GATES, TAKE_THRESHOLD
+from models import ScoreResult, SignalResult
+
+
+CHECK_LABELS = {
+    'daily_checked': 'Daily chart checked',
+    'no_strong_downtrend': 'No strong daily downtrend',
+    'no_strong_uptrend': 'No strong daily uptrend',
+    'no_earnings_24h': 'No earnings within 24h',
+    'no_fed_today': 'No Fed day',
+    'no_tesla_news': 'No Tesla catalyst',
+    'fvg_identified': 'FVG direction matches',
+    'price_near_fvg': 'Price is inside the matching FVG',
+    'bb_signal': 'Bollinger Band confirmation',
+    'bb_not_expanding': 'Bollinger Bands not expanding',
+    'stoch_confirmed': 'Stoch RSI confirmation',
+    'stoch_not_mid_range': 'Stoch RSI not mid-range',
+    'initial_size_3k': 'Initial size confirmed',
+    'max_2_positions': 'Open positions within limit',
+    'total_under_deployed_limit': 'Total deployed below limit',
+    'max_avgdown_defined': 'Max average-down level defined',
+    'profit_target_2_3pct': 'Profit target confirmed',
+    'hard_stop_defined': 'Hard stop confirmed',
+    'tsll_tslz_max_6k': 'TSLL/TSLZ position within cap',
+    'position_within_cap': 'Position size within cap',
+    'final_fvg': 'Final FVG gate',
+    'final_bb': 'Final BB gate',
+    'final_stoch': 'Final Stoch gate',
+    'final_bias': 'Final daily bias gate',
+    'final_no_news': 'Final no-catalyst gate',
+}
 
 
 def money(value):
@@ -30,7 +60,7 @@ def position_cap_for(portfolio, instrument_type):
     return portfolio_rule(portfolio, 'max_stock_position')
 
 
-def score_signals(ticker, signals, portfolio, instrument_type='stock'):
+def score_signals(ticker, signals: SignalResult, portfolio, instrument_type='stock') -> ScoreResult:
     checks    = {}
     direction = signals.get('direction', 'neutral')
     fvg       = signals.get('fvg', {})
@@ -88,7 +118,7 @@ def score_signals(ticker, signals, portfolio, instrument_type='stock'):
     # Manual confirmations — set these in PORTFOLIO_STATE before each session
     checks['initial_size_3k']     = portfolio.get('initial_size_confirmed', True)
     checks['max_2_positions']     = portfolio.get('open_positions', 0) <= max_open_positions
-    checks['total_under_60k']     = portfolio.get('total_deployed', 0) < max_total_deployed
+    checks['total_under_deployed_limit'] = portfolio.get('total_deployed', 0) < max_total_deployed
     checks['max_avgdown_defined'] = portfolio.get('max_avgdown_defined', True)
 
     # ── STEP 4 — Trade Parameters ──────────────────────────────────────────
@@ -119,19 +149,16 @@ def score_signals(ticker, signals, portfolio, instrument_type='stock'):
     has_stoch = checks['stoch_confirmed'] and checks['stoch_not_mid_range']
     core_count = sum([has_fvg, has_bb, has_stoch])
 
-    risk_gates = [
-        'no_earnings_24h',
-        'no_fed_today',
-        'no_tesla_news',
-        'max_2_positions',
-        'total_under_60k',
-        'position_within_cap',
-    ]
+    risk_gates = RISK_GATES
     risk_clear = all(checks[key] for key in risk_gates)
     risk_passed = sum(1 for key in risk_gates if checks[key])
 
     cap_label = 'TSLL/TSLZ' if instrument_type == 'tsll_tslz' else 'stock'
     hard_blockers = []
+    data_quality = signals.get('data_quality') or {'valid': True, 'warnings': []}
+    if not data_quality.get('valid', True):
+        warnings = data_quality.get('warnings') or ['Data quality check failed']
+        hard_blockers.append(f"Price data unavailable or incomplete: {warnings[0]}")
     if not checks['no_earnings_24h']:
         hard_blockers.append('Earnings within 24h')
     if not checks['no_fed_today']:
@@ -140,12 +167,12 @@ def score_signals(ticker, signals, portfolio, instrument_type='stock'):
         hard_blockers.append('Tesla catalyst active')
     if not checks['max_2_positions']:
         hard_blockers.append(f"Open positions exceed {max_open_positions}")
-    if not checks['total_under_60k']:
+    if not checks['total_under_deployed_limit']:
         hard_blockers.append(f"Total deployed at or above {money(max_total_deployed)}")
     if not checks['position_within_cap']:
         hard_blockers.append(f"Position size exceeds {money(max_size)} {cap_label} cap")
 
-    if not risk_clear:
+    if hard_blockers or not risk_clear:
         verdict = "SKIP"
     elif core_count == 3 and score >= TAKE_THRESHOLD:
         verdict = "TAKE"
@@ -163,6 +190,10 @@ def score_signals(ticker, signals, portfolio, instrument_type='stock'):
         setup_reasons.append('Stoch RSI confirmation missing or mid-range')
 
     blocker_reasons = hard_blockers or setup_reasons
+    check_reasons = [
+        {'key': key, 'passed': bool(value), 'label': CHECK_LABELS.get(key, key)}
+        for key, value in checks.items()
+    ]
 
     return {
         'ticker':      ticker,
@@ -178,6 +209,7 @@ def score_signals(ticker, signals, portfolio, instrument_type='stock'):
         'has_stoch':   has_stoch,
         'hard_blockers': hard_blockers,
         'blocker_reasons': blocker_reasons,
+        'check_reasons': check_reasons,
         'score_sections': {
             'core_setup': f"{core_count}/3",
             'risk_gates': f"{risk_passed}/{len(risk_gates)}",

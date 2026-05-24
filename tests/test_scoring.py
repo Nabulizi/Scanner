@@ -1,5 +1,7 @@
 import unittest
 
+from config import DEFAULT_RULES, RISK_GATES
+from models import ScoreResult, SignalResult
 from scoring import score_signals
 
 
@@ -39,6 +41,15 @@ def clean_portfolio():
 
 
 class ScoreSignalsTest(unittest.TestCase):
+    def test_config_exposes_named_risk_gates(self):
+        self.assertEqual(DEFAULT_RULES['max_total_deployed'], 60_000)
+        self.assertIn('total_under_deployed_limit', RISK_GATES)
+        self.assertNotIn('total_under_60k', RISK_GATES)
+
+    def test_models_are_importable_contracts(self):
+        self.assertIsNotNone(SignalResult)
+        self.assertIsNotNone(ScoreResult)
+
     def test_total_deployed_limit_is_a_hard_blocker(self):
         portfolio = clean_portfolio()
         portfolio['total_deployed'] = 60_000
@@ -46,6 +57,7 @@ class ScoreSignalsTest(unittest.TestCase):
         result = score_signals('TEST', clean_long_signals(), portfolio)
 
         self.assertEqual(result['verdict'], 'SKIP')
+        self.assertFalse(result['checks']['total_under_deployed_limit'])
         self.assertIn('Total deployed at or above $60,000', result['hard_blockers'])
 
     def test_total_deployed_limit_comes_from_portfolio_state(self):
@@ -74,6 +86,33 @@ class ScoreSignalsTest(unittest.TestCase):
         self.assertEqual(result['score_sections']['core_setup'], '3/3')
         self.assertEqual(result['score_sections']['risk_gates'], '6/6')
         self.assertEqual(result['score_sections']['checklist'], '25/25')
+
+    def test_clean_trade_has_no_blockers_and_has_reason_for_each_check(self):
+        result = score_signals('TEST', clean_long_signals(), clean_portfolio())
+
+        self.assertEqual(result['verdict'], 'TAKE')
+        self.assertEqual(result['hard_blockers'], [])
+        self.assertEqual(result['blocker_reasons'], [])
+        self.assertEqual(len(result['check_reasons']), result['total'])
+        self.assertIn(
+            {'key': 'bb_signal', 'passed': True, 'label': 'Bollinger Band confirmation'},
+            result['check_reasons'],
+        )
+
+    def test_invalid_price_data_is_a_hard_blocker(self):
+        signals = clean_long_signals()
+        signals['data_quality'] = {
+            'valid': False,
+            'warnings': ['Not enough 1H candles'],
+        }
+
+        result = score_signals('TEST', signals, clean_portfolio())
+
+        self.assertEqual(result['verdict'], 'SKIP')
+        self.assertIn(
+            'Price data unavailable or incomplete: Not enough 1H candles',
+            result['hard_blockers'],
+        )
 
 
 if __name__ == '__main__':
