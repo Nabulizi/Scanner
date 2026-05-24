@@ -39,14 +39,21 @@ def score_signals(ticker, signals, portfolio, instrument_type='stock'):
     checks['no_tesla_news']       = not portfolio.get('tesla_catalyst', False)
 
     # ── STEP 2 — Setup Validation (the only checks that matter for verdict) ───
-    has_bullish = fvg.get('bullish') is not None
-    has_bearish = fvg.get('bearish') is not None
-
-    checks['fvg_identified']      = has_bullish or has_bearish
-    checks['price_near_fvg']      = (
-        (fvg.get('bullish') or {}).get('price_inside', False) or
-        (fvg.get('bearish') or {}).get('price_inside', False)
-    )
+    # FVG direction must match trade direction to avoid signal mismatch
+    if direction == 'long':
+        checks['fvg_identified'] = fvg.get('bullish') is not None
+        checks['price_near_fvg'] = (fvg.get('bullish') or {}).get('price_inside', False)
+    elif direction == 'short':
+        checks['fvg_identified'] = fvg.get('bearish') is not None
+        checks['price_near_fvg'] = (fvg.get('bearish') or {}).get('price_inside', False)
+    else:  # neutral — accept either
+        checks['fvg_identified'] = (
+            fvg.get('bullish') is not None or fvg.get('bearish') is not None
+        )
+        checks['price_near_fvg'] = (
+            (fvg.get('bullish') or {}).get('price_inside', False) or
+            (fvg.get('bearish') or {}).get('price_inside', False)
+        )
 
     if direction == 'short':
         checks['bb_signal'] = signals.get('near_upper_bb', False)
@@ -89,18 +96,31 @@ def score_signals(ticker, signals, portfolio, instrument_type='stock'):
         checks['no_strong_downtrend'] if direction == 'long'
         else checks['no_strong_uptrend']
     )
-    checks['final_no_news'] = checks['no_earnings_24h'] and checks['no_fed_today']
+    checks['final_no_news'] = (
+        checks['no_earnings_24h'] and checks['no_fed_today'] and checks['no_tesla_news']
+    )
 
     score = sum(1 for v in checks.values() if v)
     total = len(checks)   # 25
 
-    # ── Verdict — core gate first ─────────────────────────────────────────────
+    # ── Verdict — risk veto then core gate ──────────────────────────────────────
     has_fvg   = checks['fvg_identified']
     has_bb    = checks['bb_signal'] and checks['bb_not_expanding']
     has_stoch = checks['stoch_confirmed'] and checks['stoch_not_mid_range']
     core_count = sum([has_fvg, has_bb, has_stoch])
 
-    if core_count == 3 and score >= TAKE_THRESHOLD:
+    # Hard-block conditions — any failure forces SKIP regardless of signals/score
+    risk_clear = (
+        checks['no_earnings_24h'] and
+        checks['no_fed_today'] and
+        checks['no_tesla_news'] and
+        checks['max_2_positions'] and
+        checks['position_within_cap']
+    )
+
+    if not risk_clear:
+        verdict = "SKIP"
+    elif core_count == 3 and score >= TAKE_THRESHOLD:
         verdict = "TAKE"
     elif core_count >= 2 and score >= REDUCE_THRESHOLD:
         verdict = "REDUCE"
