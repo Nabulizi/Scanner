@@ -34,7 +34,7 @@ STOCH_MID_HIGH     = 60        # Mid-range (skip zone) upper bound
 FVG_LOOKBACK       = 40        # How many 1H bars to look back for FVGs
 FVG_APPROACH_PCT   = 0.02      # Price within 2% of FVG counts as "approaching"
 
-DATA_PERIOD        = "30d"     # 30 days of 1H data (~500 bars on trading days)
+DATA_PERIOD        = "30d"     # 30 days of 1H data (~240 bars on trading days)
 DATA_INTERVAL      = "1h"
 
 EARNINGS_WINDOW_H  = 24        # Skip trade if earnings within ±24 hours
@@ -54,7 +54,7 @@ def fetch_ohlcv(ticker: str) -> pd.DataFrame:
     """Download 1H OHLCV from Yahoo Finance and clean it."""
     tk = yf.Ticker(ticker)
     df = tk.history(period=DATA_PERIOD, interval=DATA_INTERVAL)
-    df.dropna(inplace=True)
+    df = df.dropna()
 
     if len(df) < BB_WINDOW + 10:
         raise ValueError(f"Not enough data for {ticker} — only {len(df)} bars returned.")
@@ -181,8 +181,8 @@ def detect_fvg(df: pd.DataFrame, lookback: int = FVG_LOOKBACK) -> dict:
         if h_2 < l_i:
             gap_bottom = h_2
             gap_top    = l_i
-            # Current price is at or approaching gap from below
-            if current_price <= gap_top * (1 + FVG_APPROACH_PCT):
+            # Current price is within approach range of the gap (above floor, below ceiling)
+            if gap_bottom * (1 - FVG_APPROACH_PCT) <= current_price <= gap_top * (1 + FVG_APPROACH_PCT):
                 results['bullish'] = {
                     'gap_bottom':   round(float(gap_bottom), 4),
                     'gap_top':      round(float(gap_top), 4),
@@ -194,8 +194,8 @@ def detect_fvg(df: pd.DataFrame, lookback: int = FVG_LOOKBACK) -> dict:
         if l_2 > h_i:
             gap_bottom = h_i
             gap_top    = l_2
-            # Current price is at or approaching gap from above
-            if current_price >= gap_bottom * (1 - FVG_APPROACH_PCT):
+            # Current price is within approach range of the gap (above floor, below ceiling)
+            if gap_bottom * (1 - FVG_APPROACH_PCT) <= current_price <= gap_top * (1 + FVG_APPROACH_PCT):
                 results['bearish'] = {
                     'gap_bottom':   round(float(gap_bottom), 4),
                     'gap_top':      round(float(gap_top), 4),
@@ -283,6 +283,10 @@ def fetch_and_analyze(ticker: str) -> dict:
         'earnings_soon':       earnings_soon,
         'fed_day':             False,
         'tesla_catalyst':      False,
+        # These are session-level manual confirmations — passed in via PORTFOLIO_STATE
+        # and forwarded here so scoring.py can read them from signals.
+        # They default True to preserve backwards compatibility but should be set
+        # in watchlist.py PORTFOLIO_STATE before each session.
         'no_strong_downtrend': True,
         'no_strong_uptrend':   True,
         'daily_checked':       True,

@@ -31,9 +31,10 @@ def score_signals(ticker, signals, portfolio, instrument_type='stock'):
     max_size  = MAX_SIZE.get(instrument_type, 10_000)
 
     # ── STEP 1 — Market Context ───────────────────────────────────────────────
-    checks['daily_checked']       = signals.get('daily_checked', True)
-    checks['no_strong_downtrend'] = signals.get('no_strong_downtrend', True)
-    checks['no_strong_uptrend']   = signals.get('no_strong_uptrend', True)
+    # Manual confirmations — set these in PORTFOLIO_STATE before each session
+    checks['daily_checked']       = portfolio.get('daily_chart_checked', True)
+    checks['no_strong_downtrend'] = portfolio.get('no_strong_downtrend', True)
+    checks['no_strong_uptrend']   = portfolio.get('no_strong_uptrend', True)
     checks['no_earnings_24h']     = not signals.get('earnings_soon', False)
     checks['no_fed_today']        = not portfolio.get('fed_day', False)
     checks['no_tesla_news']       = not portfolio.get('tesla_catalyst', False)
@@ -45,14 +46,18 @@ def score_signals(ticker, signals, portfolio, instrument_type='stock'):
     checks['fvg_identified']      = has_bullish or has_bearish
     checks['price_near_fvg']      = (
         (fvg.get('bullish') or {}).get('price_inside', False) or
-        (fvg.get('bearish') or {}).get('price_inside', False) or
-        checks['fvg_identified']
+        (fvg.get('bearish') or {}).get('price_inside', False)
     )
 
     if direction == 'short':
         checks['bb_signal'] = signals.get('near_upper_bb', False)
-    else:
+    elif direction == 'long':
         checks['bb_signal'] = signals.get('near_lower_bb', False)
+    else:  # neutral — accept either band touch
+        checks['bb_signal'] = (
+            signals.get('near_lower_bb', False) or
+            signals.get('near_upper_bb', False)
+        )
 
     checks['bb_not_expanding']    = not signals.get('bb_expanding', True)
 
@@ -64,14 +69,16 @@ def score_signals(ticker, signals, portfolio, instrument_type='stock'):
     checks['stoch_not_mid_range'] = not signals.get('stoch_mid_range', True)
 
     # ── STEP 3 — Position Sizing ──────────────────────────────────────────────
-    checks['initial_size_3k']     = True
+    # Manual confirmations — set these in PORTFOLIO_STATE before each session
+    checks['initial_size_3k']     = portfolio.get('initial_size_confirmed', True)
     checks['max_2_positions']     = portfolio.get('open_positions', 0) <= 2
     checks['total_under_60k']     = portfolio.get('total_deployed', 0) < 60_000
-    checks['max_avgdown_defined'] = True
+    checks['max_avgdown_defined'] = portfolio.get('max_avgdown_defined', True)
 
-    # ── STEP 4 — Trade Parameters ─────────────────────────────────────────────
-    checks['profit_target_2_3pct'] = True
-    checks['hard_stop_defined']    = True
+    # ── STEP 4 — Trade Parameters ──────────────────────────────────────────
+    # Manual confirmations — set these in PORTFOLIO_STATE before each session
+    checks['profit_target_2_3pct'] = portfolio.get('profit_target_confirmed', True)
+    checks['hard_stop_defined']    = portfolio.get('hard_stop_confirmed', True)
     checks['tsll_tslz_max_6k']     = pos_size <= 6_000 if instrument_type == 'tsll_tslz' else True
     checks['crypto_max_6k']        = pos_size <= 6_000 if instrument_type == 'crypto'    else True
     checks['position_within_cap']  = pos_size <= max_size

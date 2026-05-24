@@ -199,7 +199,7 @@ def print_detail(r):
         chk.add_row(left, right)
 
     # ── Assemble panel ────────────────────────────────────────────────────────
-    content = Text()
+
 
     score_pct = r['score'] / r['total']
     bar_filled = round(score_pct * 20)
