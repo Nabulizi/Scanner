@@ -54,7 +54,7 @@ python scanner.py --verbose
 
 ## How scoring works
 
-Mirrors your checklist exactly — 26 checks across 5 steps:
+Mirrors your checklist exactly — 25 checks across 5 steps:
 
 | Step | Category          | Checks | Key signals |
 |------|-------------------|--------|-------------|
