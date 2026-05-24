@@ -52,4 +52,15 @@ PORTFOLIO_STATE = {
 
     # Default new position size (scanner uses $3,000 per your rules)
     "position_size":    3000,
+
+    # ── Manual pre-session confirmations ───────────────────────────────────
+    # Review and update these before each scan session.
+    # Keeping them True means the check always passes; set to False to block trades.
+    "daily_chart_checked":     True,   # Have you reviewed the daily chart?
+    "no_strong_downtrend":     True,   # No strong downtrend visible on daily
+    "no_strong_uptrend":       True,   # No strong uptrend visible on daily
+    "initial_size_confirmed":  True,   # Position sized at $3K initial entry
+    "max_avgdown_defined":     True,   # Max avg-down level written down
+    "profit_target_confirmed": True,   # 2–3% profit target set before entry
+    "hard_stop_confirmed":     True,   # Hard stop level defined before entry
 }
