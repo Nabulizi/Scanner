@@ -178,27 +178,35 @@ def detect_fvg(df: pd.DataFrame, lookback: int = FVG_LOOKBACK) -> dict:
         if h_2 < l_i:
             gap_bottom = h_2
             gap_top    = l_i
-            # Current price is within approach range of the gap (above floor, below ceiling)
-            if gap_bottom * (1 - FVG_APPROACH_PCT) <= current_price <= gap_top * (1 + FVG_APPROACH_PCT):
-                results['bullish'] = {
-                    'gap_bottom':   round(float(gap_bottom), 4),
-                    'gap_top':      round(float(gap_top), 4),
-                    'price_inside': bool(gap_bottom <= current_price <= gap_top),
-                    'gap_size_pct': round((gap_top - gap_bottom) / gap_bottom * 100, 3),
-                }
+            # Skip if any subsequent candle filled the gap (low pierced below gap_bottom)
+            subsequent = recent.iloc[i + 1:]
+            gap_filled = len(subsequent) > 0 and (subsequent['Low'] <= gap_bottom).any()
+            if not gap_filled:
+                # Current price is within approach range of the gap
+                if gap_bottom * (1 - FVG_APPROACH_PCT) <= current_price <= gap_top * (1 + FVG_APPROACH_PCT):
+                    results['bullish'] = {
+                        'gap_bottom':   round(float(gap_bottom), 4),
+                        'gap_top':      round(float(gap_top), 4),
+                        'price_inside': bool(gap_bottom <= current_price <= gap_top),
+                        'gap_size_pct': round((gap_top - gap_bottom) / gap_bottom * 100, 3),
+                    }
 
         # ── Bearish FVG ──────────────────────────────────────────────────────
         if l_2 > h_i:
             gap_bottom = h_i
             gap_top    = l_2
-            # Current price is within approach range of the gap (above floor, below ceiling)
-            if gap_bottom * (1 - FVG_APPROACH_PCT) <= current_price <= gap_top * (1 + FVG_APPROACH_PCT):
-                results['bearish'] = {
-                    'gap_bottom':   round(float(gap_bottom), 4),
-                    'gap_top':      round(float(gap_top), 4),
-                    'price_inside': bool(gap_bottom <= current_price <= gap_top),
-                    'gap_size_pct': round((gap_top - gap_bottom) / gap_bottom * 100, 3),
-                }
+            # Skip if any subsequent candle filled the gap (high pierced above gap_top)
+            subsequent = recent.iloc[i + 1:]
+            gap_filled = len(subsequent) > 0 and (subsequent['High'] >= gap_top).any()
+            if not gap_filled:
+                # Current price is within approach range of the gap
+                if gap_bottom * (1 - FVG_APPROACH_PCT) <= current_price <= gap_top * (1 + FVG_APPROACH_PCT):
+                    results['bearish'] = {
+                        'gap_bottom':   round(float(gap_bottom), 4),
+                        'gap_top':      round(float(gap_top), 4),
+                        'price_inside': bool(gap_bottom <= current_price <= gap_top),
+                        'gap_size_pct': round((gap_top - gap_bottom) / gap_bottom * 100, 3),
+                    }
 
     return results
 

@@ -2,7 +2,7 @@
 **Pre-trade signal scanner — FVG + Bollinger Bands + Stochastic RSI**
 
 Built to mirror your Google Sheets pre-trade checklist exactly.
-Scans your watchlist on 1H data and scores each ticker against all 26 checks.
+Scans your watchlist on 1H data and scores each ticker against all 25 checks.
 
 ---
 
@@ -54,14 +54,14 @@ python scanner.py --verbose
 
 ## How scoring works
 
-Mirrors your checklist exactly — 26 checks across 5 steps:
+Mirrors your checklist exactly — 25 checks across 5 steps:
 
 | Step | Category          | Checks | Key signals |
 |------|-------------------|--------|-------------|
 | 1    | Market context    | 6      | No earnings, no Fed, no Tesla catalyst |
 | 2    | Setup validation  | 6      | **FVG + BB touch + Stoch RSI cross** |
 | 3    | Position sizing   | 4      | Max 2 open, under $60K deployed |
-| 4    | Trade parameters  | 5      | Size within cap (TSLL/TSLZ $6K, crypto $6K, stocks $10K) |
+| 4    | Trade parameters  | 4      | Size within cap (TSLL/TSLZ $6K, stocks $10K) |
 | 5    | Final go/no-go   | 5      | All 3 signals confirmed + no news |
 
 **Verdict thresholds (exact match to your Apps Script):**
@@ -96,10 +96,9 @@ In `watchlist.py`, add a line to `WATCHLIST`:
 
 ```python
 {"ticker": "AMZN", "type": "stock"},
-{"ticker": "UNI-USD", "type": "crypto"},
 ```
 
-Types: `"stock"` · `"crypto"` · `"tsll_tslz"`
+Types: `"stock"` · `"tsll_tslz"`
 
 ---
 
