@@ -38,6 +38,7 @@ FVG_APPROACH_PCT   = 0.02      # Price within 2% of FVG counts as "approaching"
 
 DATA_PERIOD        = "30d"     # 30 days of 1H data (~240 bars on trading days)
 DATA_INTERVAL      = "1h"
+FETCH_RETRIES      = 2
 
 EARNINGS_WINDOW_H  = 24        # Skip trade if earnings within ±24 hours
 
@@ -46,18 +47,44 @@ NO_EARNINGS_TICKERS = {
     "TSLL", "TSLZ",   # leveraged ETFs — no earnings calendar
 }
 
+_OHLCV_CACHE = {}
+
+
+def clear_ohlcv_cache():
+    _OHLCV_CACHE.clear()
+
 
 # ── Data fetcher ─────────────────────────────────────────────────────────────
 
 def fetch_ohlcv(ticker: str) -> pd.DataFrame:
     """Download 1H OHLCV from Yahoo Finance and clean it."""
-    tk = yf.Ticker(ticker)
-    df = tk.history(period=DATA_PERIOD, interval=DATA_INTERVAL)
+    cache_key = (ticker.upper(), DATA_PERIOD, DATA_INTERVAL)
+    if cache_key in _OHLCV_CACHE:
+        return _OHLCV_CACHE[cache_key].copy()
+
+    last_error = None
+    df = None
+    for _ in range(FETCH_RETRIES):
+        try:
+            tk = yf.Ticker(ticker)
+            df = tk.history(period=DATA_PERIOD, interval=DATA_INTERVAL)
+            break
+        except Exception as e:
+            last_error = e
+
+    if df is None:
+        raise ValueError(
+            f"Could not fetch 1H data for {ticker} after {FETCH_RETRIES} attempts: {last_error}"
+        )
+
     df = df.dropna()
 
     if len(df) < BB_WINDOW + 10:
-        raise ValueError(f"Not enough data for {ticker} — only {len(df)} bars returned.")
+        raise ValueError(
+            f"Not enough 1H data for {ticker}: got {len(df)} bars, need {BB_WINDOW + 10}."
+        )
 
+    _OHLCV_CACHE[cache_key] = df.copy()
     return df
 
 
