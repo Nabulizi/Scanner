@@ -3,8 +3,9 @@ watchlist.py — Edit this file to match your positions and tickers.
 ==================================================================
 Types:
   'tsll_tslz' — Leveraged Tesla ETFs (max $6K per position, 1 add only)
-  'crypto'    — BTC, ETH, DOGE, IBIT, BITI, etc. (max $6K per position)
   'stock'     — Large cap stocks, regular ETFs (max $10K per position)
+
+This scanner is configured for stocks only. Crypto tickers are excluded.
 """
 
 # ── Your watchlist ────────────────────────────────────────────────────────────
@@ -14,13 +15,6 @@ WATCHLIST = [
     # ── Tesla Leveraged ETFs (your #1 strategy by volume) ──
     {"ticker": "TSLL", "type": "tsll_tslz"},
     {"ticker": "TSLZ", "type": "tsll_tslz"},
-
-    # ── Crypto / Bitcoin ETFs ──
-    {"ticker": "IBIT", "type": "crypto"},
-    {"ticker": "BITI", "type": "crypto"},
-    {"ticker": "BTC-USD",  "type": "crypto"},
-    {"ticker": "ETH-USD",  "type": "crypto"},
-    {"ticker": "DOGE-USD", "type": "crypto"},
 
     # ── Large Cap Stocks (your NFLX/BABA high-avg-win plays) ──
     {"ticker": "NFLX", "type": "stock"},
@@ -32,7 +26,8 @@ WATCHLIST = [
     # ── Add more tickers here ──
     # {"ticker": "AMZN", "type": "stock"},
     # {"ticker": "META", "type": "stock"},
-    # {"ticker": "UNI-USD", "type": "crypto"},
+    # {"ticker": "MSFT", "type": "stock"},
+    # {"ticker": "GOOGL", "type": "stock"},
 ]
 
 

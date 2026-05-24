@@ -41,10 +41,7 @@ EARNINGS_WINDOW_H  = 24        # Skip trade if earnings within ±24 hours
 
 # Tickers that never have earnings reports — always return False
 NO_EARNINGS_TICKERS = {
-    "TSLL", "TSLZ",                            # leveraged ETFs
-    "BTC-USD", "ETH-USD", "DOGE-USD",          # direct crypto
-    "IBIT", "BITI",                            # bitcoin ETFs
-    "UNI-USD", "LINK-USD", "ETC-USD",          # DeFi / alt crypto
+    "TSLL", "TSLZ",   # leveraged ETFs — no earnings calendar
 }
 
 
