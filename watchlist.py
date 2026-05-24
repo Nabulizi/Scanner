@@ -6,6 +6,11 @@ Types:
   'stock'     — Large cap stocks, regular ETFs (max $10K per position)
 
 This scanner is configured for stocks only. Crypto tickers are excluded.
+
+parent field (optional):
+  If a ticker has a 'parent' set and that parent stock is also in the watchlist,
+  the derivative (ETF) is automatically skipped. Scan the underlying stock instead.
+  Example: TSLL and TSLZ both have parent='TSLA'. If TSLA is in the list, they’re skipped.
 """
 
 # ── Your watchlist ────────────────────────────────────────────────────────────
@@ -13,15 +18,16 @@ This scanner is configured for stocks only. Crypto tickers are excluded.
 
 WATCHLIST = [
     # ── Tesla Leveraged ETFs (your #1 strategy by volume) ──
-    {"ticker": "TSLL", "type": "tsll_tslz"},
-    {"ticker": "TSLZ", "type": "tsll_tslz"},
+    # parent='TSLA' — these are skipped automatically when TSLA is in the list
+    {"ticker": "TSLL", "type": "tsll_tslz", "parent": "TSLA"},
+    {"ticker": "TSLZ", "type": "tsll_tslz", "parent": "TSLA"},
 
     # ── Large Cap Stocks (your NFLX/BABA high-avg-win plays) ──
     {"ticker": "NFLX", "type": "stock"},
     {"ticker": "BABA", "type": "stock"},
     {"ticker": "AAPL", "type": "stock"},
     {"ticker": "NVDA", "type": "stock"},
-    {"ticker": "TSLA", "type": "stock"},   # underlying, not leveraged ETF
+    {"ticker": "TSLA", "type": "stock"},   # underlying — TSLL/TSLZ skipped when this is present
 
     # ── Add more tickers here ──
     # {"ticker": "AMZN", "type": "stock"},

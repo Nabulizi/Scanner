@@ -259,14 +259,35 @@ def run_scan(tickers=None, alerts_only=False, verbose=False):
     print_header()
     print_portfolio(PORTFOLIO_STATE)
 
-    scan_list = tickers or [w['ticker'] for w in WATCHLIST]
+    # Build the raw scan list from arg or full watchlist
+    if tickers:
+        scan_entries = [w for w in WATCHLIST if w['ticker'] in tickers] or \
+                       [{'ticker': t, 'type': 'stock'} for t in tickers]
+    else:
+        scan_entries = list(WATCHLIST)
+
+    # Skip any derivative (ETF) whose parent stock is also in the scan list
+    all_tickers_in_scan = {e['ticker'] for e in scan_entries}
+    skipped = []
+    filtered_entries = []
+    for entry in scan_entries:
+        parent = entry.get('parent')
+        if parent and parent in all_tickers_in_scan:
+            skipped.append((entry['ticker'], parent))
+        else:
+            filtered_entries.append(entry)
+
+    if skipped:
+        for etf, parent in skipped:
+            console.print(f"  [dim]SKIPPED  {etf:<10} (parent {parent} is in watchlist)[/dim]")
+        console.print()
+
     results, errors = [], []
+    console.print(f"  [dim]Scanning {len(filtered_entries)} ticker(s) on 1H data…[/dim]\n")
 
-    console.print(f"  [dim]Scanning {len(scan_list)} ticker(s) on 1H data…[/dim]\n")
-
-    for ticker in scan_list:
-        wl_entry = next((w for w in WATCHLIST if w['ticker'] == ticker), None)
-        itype    = wl_entry['type'] if wl_entry else 'stock'
+    for entry in filtered_entries:
+        ticker = entry['ticker']
+        itype  = entry.get('type', 'stock')
         try:
             signals = fetch_and_analyze(ticker)
             result  = score_signals(ticker, signals, PORTFOLIO_STATE, itype)
