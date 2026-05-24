@@ -54,6 +54,14 @@ PORTFOLIO_STATE = {
     # Default new position size (scanner uses $3,000 per your rules)
     "position_size":    3000,
 
+    # ── Strategy limits ─────────────────────────────────────────────────────
+    # These are hard risk gates. If one fails, the scanner returns SKIP even
+    # when the technical setup is otherwise clean.
+    "max_total_deployed":      60000,
+    "max_open_positions":     2,
+    "max_stock_position":     10000,
+    "max_tsll_tslz_position": 6000,
+
     # ── Manual pre-session confirmations ───────────────────────────────────
     # Review and update these before each scan session.
     # Keeping them True means the check always passes; set to False to block trades.

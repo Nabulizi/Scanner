@@ -5,6 +5,7 @@ Usage:
   python3 scanner.py              # full watchlist scan
   python3 scanner.py --alerts     # only TAKE THE TRADE setups
   python3 scanner.py --ticker TSLL
+  python3 scanner.py --explain    # show blockers and score breakdown
   python3 scanner.py --verbose    # detail for every ticker
 """
 
@@ -48,6 +49,20 @@ def signal_cell(val: bool, label_on="", label_off=""):
         return Text(f"✔  {label_on}" if label_on else "✔", style="green")
     return Text(f"✘  {label_off}" if label_off else "✘", style="dim red")
 
+def reason_summary(r):
+    reasons = r.get('blocker_reasons') or []
+    if not reasons:
+        return "—"
+    first = reasons[0]
+    return (
+        first
+        .replace("Total deployed at or above", "Deployed >=")
+        .replace("Position size exceeds", "Size >")
+        .replace("FVG missing or direction-mismatched", "No matching FVG")
+        .replace("Bollinger confirmation missing or expanding", "No BB confirmation")
+        .replace("Stoch RSI confirmation missing or mid-range", "No Stoch confirmation")
+    )
+
 
 # ── Header ────────────────────────────────────────────────────────────────────
 
@@ -66,6 +81,8 @@ def print_portfolio(portfolio):
     fed        = portfolio.get('fed_day', False)
     tesla_news = portfolio.get('tesla_catalyst', False)
     pos_size   = portfolio.get('position_size', 3000)
+    max_deployed = portfolio.get('max_total_deployed', 60_000)
+    max_positions = portfolio.get('max_open_positions', 2)
 
     flags = []
     if fed:        flags.append("[bold red]⚠  FED DAY[/bold red]")
@@ -78,6 +95,7 @@ def print_portfolio(portfolio):
     t.add_row("Capital deployed",  f"[bold]${deployed:,.0f}[/bold]")
     t.add_row("Open positions",    f"[bold]{open_pos}[/bold]")
     t.add_row("Entry size",        f"[bold]${pos_size:,.0f}[/bold]")
+    t.add_row("Risk limits",       f"[bold]${max_deployed:,.0f}[/bold] deployed · [bold]{max_positions}[/bold] positions")
     t.add_row("Alerts",            "  ".join(flags))
 
     console.print(Panel(t, title="[bold]Portfolio State[/bold]", border_style="dim", padding=(0,1)))
@@ -103,6 +121,7 @@ def print_results_table(results):
     t.add_column("SCORE",     width=8,  justify="center")
     t.add_column("CLOSE",     width=10, justify="right")
     t.add_column("VERDICT",   width=16)
+    t.add_column("WHY",       width=32)
 
     for r in results:
         pd   = r.get('price_data') or {}
@@ -129,6 +148,7 @@ def print_results_table(results):
             Text(f"{r['score']}/{r['total']}", style=score_style),
             close_str,
             Text(vlabel, style=vstyle),
+            reason_summary(r),
         )
 
     console.print(t)
@@ -142,6 +162,7 @@ def print_detail(r):
     vstyle, vlabel = VERDICT_STYLE.get(r['verdict'], ("white", r['verdict']))
     dstyle, dlabel = DIR_STYLE.get(r['direction'], ("white", r['direction'].upper()))
     fvg = r.get('fvg_detail', {})
+    sections = r.get('score_sections') or {}
 
     # ── Price strip ───────────────────────────────────────────────────────────
     price_row = Table.grid(padding=(0, 4))
@@ -209,6 +230,7 @@ def print_detail(r):
         "\n".join([
             "",
             f"  [dim]Direction[/dim]  [{dstyle}]{dlabel}[/{dstyle}]          [dim]Score[/dim]  [{('green' if score_pct>=0.75 else 'yellow' if score_pct>=0.5 else 'red')}]{bar}[/]",
+            f"  [dim]Core[/dim]  {sections.get('core_setup', '—')}          [dim]Risk[/dim]  {sections.get('risk_gates', '—')}          [dim]Checklist[/dim]  {sections.get('checklist', '—')}",
             "",
             "  [bold dim]─── Core Signals ────────────────────────────────[/bold dim]",
             "",
@@ -223,6 +245,11 @@ def print_detail(r):
     if fvg_lines:
         for line in fvg_lines:
             console.print(line)
+    if r.get('blocker_reasons'):
+        console.print()
+        console.print("  [dim]Why[/dim]")
+        for reason in r['blocker_reasons']:
+            console.print(f"  [red]•[/red] {reason}")
     console.print()
     console.print("  [dim]Step 2 — Setup          Step 5 — Final Gate[/dim]")
     console.print(chk)
@@ -255,7 +282,7 @@ def print_summary(results):
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-def run_scan(tickers=None, alerts_only=False, verbose=False):
+def run_scan(tickers=None, alerts_only=False, verbose=False, explain=False):
     print_header()
     print_portfolio(PORTFOLIO_STATE)
 
@@ -313,9 +340,9 @@ def run_scan(tickers=None, alerts_only=False, verbose=False):
     console.print()
     print_summary(results)
 
-    # Detail for TAKE + REDUCE, or all if verbose
+    # Detail for TAKE + REDUCE, or all if verbose/explain
     for r in display:
-        if verbose or r['verdict'] in ('TAKE', 'REDUCE'):
+        if verbose or explain or r['verdict'] in ('TAKE', 'REDUCE'):
             print_detail(r)
 
     if errors:
@@ -329,11 +356,12 @@ def main():
     p = argparse.ArgumentParser(description="Luminous Path Pre-Trade Scanner")
     p.add_argument('--alerts',  action='store_true', help='Only show TAKE setups')
     p.add_argument('--ticker',  type=str, help='Single ticker, e.g. --ticker TSLL')
+    p.add_argument('--explain', action='store_true', help='Show blockers and score breakdown')
     p.add_argument('--verbose', action='store_true', help='Detail for every ticker')
     args = p.parse_args()
 
     tickers = [args.ticker.upper()] if args.ticker else None
-    run_scan(tickers=tickers, alerts_only=args.alerts, verbose=args.verbose)
+    run_scan(tickers=tickers, alerts_only=args.alerts, verbose=args.verbose, explain=args.explain)
 
 
 if __name__ == "__main__":
