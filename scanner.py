@@ -11,7 +11,7 @@ Usage:
   python3 scanner.py --verbose    # detail for every ticker
 """
 
-import argparse, json, sys
+import argparse, json, os, sys
 from datetime import datetime
 from rich.console import Console
 from rich.table import Table
@@ -21,7 +21,7 @@ from rich.columns import Columns
 from rich.rule import Rule
 from rich import box
 
-from watchlist import WATCHLIST, PORTFOLIO_STATE, load_watchlist_file, resolve_watchlist_path
+from watchlist import WATCHLIST, PORTFOLIO_STATE, load_watchlist_file, resolve_watchlist_path, DEFAULT_WATCHLIST_FILE
 from indicators import fetch_and_analyze
 from scoring import score_signals
 
@@ -320,10 +320,14 @@ def build_scan_entries(tickers=None, watchlist_entries=None, file_skipped=None):
 
 
 def load_requested_watchlist(watchlist_name=None):
-    if not watchlist_name:
-        return list(WATCHLIST), []
-    path = resolve_watchlist_path(watchlist_name)
-    return load_watchlist_file(path)
+    name = watchlist_name or DEFAULT_WATCHLIST_FILE
+    path = resolve_watchlist_path(name)
+    if os.path.exists(path):
+        return load_watchlist_file(path)
+    if watchlist_name:
+        raise FileNotFoundError(f"Watchlist file not found: {path}")
+    # Default file missing — fall back to hardcoded list
+    return list(WATCHLIST), []
 
 
 def run_scan(tickers=None, alerts_only=False, verbose=False, explain=False, watchlist_name=None, output_json=False):

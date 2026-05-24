@@ -19,6 +19,10 @@ import re
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 WATCHLIST_DIR = os.path.join(SCRIPT_DIR, "watchlists")
 
+# Default watchlist file loaded when no --watchlist flag is given.
+# Relative name resolved from the watchlists/ directory.
+DEFAULT_WATCHLIST_FILE = "Watchlist_Nur"
+
 UNSUPPORTED_PREFIXES = {"CRYPTOCAP"}
 SYMBOL_RE = re.compile(r"^[A-Z0-9.\-\^=]{1,20}$")
 
