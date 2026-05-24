@@ -75,6 +75,10 @@ def resolve_watchlist_path(name_or_path: str) -> str:
 def load_watchlist_file(path: str):
     """Load a comma/newline separated watchlist file."""
     entries, skipped, seen = [], [], set()
+    default_metadata = {
+        entry['ticker']: {k: v for k, v in entry.items() if k != 'ticker'}
+        for entry in WATCHLIST
+    }
     for token in _tokens_from_file(path):
         ticker, reason = tradingview_to_yahoo(token)
         if not ticker:
@@ -82,7 +86,9 @@ def load_watchlist_file(path: str):
             continue
         if ticker in seen:
             continue
-        entries.append({"ticker": ticker, "type": "stock", "source": token.strip().upper()})
+        entry = {"ticker": ticker, "type": "stock", "source": token.strip().upper()}
+        entry.update(default_metadata.get(ticker, {}))
+        entries.append(entry)
         seen.add(ticker)
     return entries, skipped
 

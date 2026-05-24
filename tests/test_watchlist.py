@@ -34,6 +34,20 @@ class WatchlistImportTest(unittest.TestCase):
         self.assertIn("not available", skipped[0]["reason"])
         self.assertEqual(skipped[1]["symbol"], "BAD SYMBOL!")
 
+    def test_watchlist_file_keeps_known_ticker_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "tesla.txt")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("NASDAQ:TSLA,NASDAQ:TSLL,CBOE:TSLZ")
+
+            entries, skipped = load_watchlist_file(path)
+
+        self.assertEqual(skipped, [])
+        self.assertEqual(entries[1]["type"], "tsll_tslz")
+        self.assertEqual(entries[1]["parent"], "TSLA")
+        self.assertEqual(entries[2]["type"], "tsll_tslz")
+        self.assertEqual(entries[2]["parent"], "TSLA")
+
     def test_missing_watchlist_file_has_clear_error(self):
         with self.assertRaisesRegex(FileNotFoundError, "Watchlist file not found"):
             load_watchlist_file("/tmp/does-not-exist-watchlist.txt")

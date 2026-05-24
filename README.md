@@ -55,6 +55,7 @@ python scanner.py --ticker TSLL
 
 # Load a TradingView-style text watchlist
 python scanner.py --watchlist swing
+python scanner.py --watchlist Watchlist_Nur
 
 # Explain blockers and score sections
 python scanner.py --ticker TSLL --explain
@@ -148,6 +149,8 @@ TSLA
 ```
 
 Unsupported symbols are reported as skipped instead of silently ignored.
+`watchlists/Watchlist_Nur.txt` is imported from the `should-i-trade` watchlist
+with the Yahoo-compatible stock, ETF, and index symbols.
 
 ---
 
