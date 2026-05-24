@@ -17,7 +17,7 @@ pip install -r requirements.txt
 #    Trading-rule defaults live in config.py
 
 # 3. Run the scanner
-python scanner.py
+python3 scanner.py
 ```
 
 ---
@@ -45,26 +45,26 @@ PORTFOLIO_STATE = {
 
 ```bash
 # Full watchlist scan
-python scanner.py
+python3 scanner.py
 
 # Show only TAKE THE TRADE setups
-python scanner.py --alerts
+python3 scanner.py --alerts
 
 # Single ticker deep-dive
-python scanner.py --ticker TSLL
+python3 scanner.py --ticker TSLL
 
 # Load a TradingView-style text watchlist
-python scanner.py --watchlist swing
-python scanner.py --watchlist Watchlist_Nur
+python3 scanner.py --watchlist swing
+python3 scanner.py --watchlist Watchlist_Nur
 
 # Explain blockers and score sections
-python scanner.py --ticker TSLL --explain
+python3 scanner.py --ticker TSLL --explain
 
 # Machine-readable output
-python scanner.py --watchlist swing --json
+python3 scanner.py --watchlist swing --json
 
 # Verbose — show detail for every ticker
-python scanner.py --verbose
+python3 scanner.py --verbose
 ```
 
 ---
@@ -159,5 +159,5 @@ with the Yahoo-compatible stock, ETF, and index symbols.
 - Data from Yahoo Finance (free, no API key needed)
 - 1H fetches retry once, cache results during the process, and report clearer fetch errors
 - 1H data limited to ~30 days on free tier — plenty for FVG detection
-- Run from any directory: `python /path/to/luminous_scanner/scanner.py`
+- Run from any directory: `python3 /path/to/luminous_scanner/scanner.py`
 - Scanner does not place trades — it only scores setups
