@@ -1,7 +1,7 @@
 """
 scoring.py — Checklist scoring engine
 ======================================
-Mirrors your Google Sheets pre-trade checklist (26 checks).
+Mirrors your Google Sheets pre-trade checklist (25 checks, stocks only).
 
 Verdict logic (fixed):
   Core gate:  ALL 3 signals must be present — FVG + BB + Stoch
@@ -15,7 +15,6 @@ Verdict logic (fixed):
 
 MAX_SIZE = {
     'tsll_tslz': 6_000,
-    'crypto':    6_000,
     'stock':    10_000,
 }
 
@@ -80,7 +79,6 @@ def score_signals(ticker, signals, portfolio, instrument_type='stock'):
     checks['profit_target_2_3pct'] = portfolio.get('profit_target_confirmed', True)
     checks['hard_stop_defined']    = portfolio.get('hard_stop_confirmed', True)
     checks['tsll_tslz_max_6k']     = pos_size <= 6_000 if instrument_type == 'tsll_tslz' else True
-    checks['crypto_max_6k']        = pos_size <= 6_000 if instrument_type == 'crypto'    else True
     checks['position_within_cap']  = pos_size <= max_size
 
     # ── STEP 5 — Final Go/No-Go ───────────────────────────────────────────────
@@ -94,7 +92,7 @@ def score_signals(ticker, signals, portfolio, instrument_type='stock'):
     checks['final_no_news'] = checks['no_earnings_24h'] and checks['no_fed_today']
 
     score = sum(1 for v in checks.values() if v)
-    total = len(checks)   # 26
+    total = len(checks)   # 25
 
     # ── Verdict — core gate first ─────────────────────────────────────────────
     has_fvg   = checks['fvg_identified']

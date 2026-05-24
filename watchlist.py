@@ -3,8 +3,14 @@ watchlist.py — Edit this file to match your positions and tickers.
 ==================================================================
 Types:
   'tsll_tslz' — Leveraged Tesla ETFs (max $6K per position, 1 add only)
-  'crypto'    — BTC, ETH, DOGE, IBIT, BITI, etc. (max $6K per position)
   'stock'     — Large cap stocks, regular ETFs (max $10K per position)
+
+This scanner is configured for stocks only. Crypto tickers are excluded.
+
+parent field (optional):
+  If a ticker has a 'parent' set and that parent stock is also in the watchlist,
+  the derivative (ETF) is automatically skipped. Scan the underlying stock instead.
+  Example: TSLL and TSLZ both have parent='TSLA'. If TSLA is in the list, they’re skipped.
 """
 
 # ── Your watchlist ────────────────────────────────────────────────────────────
@@ -12,27 +18,22 @@ Types:
 
 WATCHLIST = [
     # ── Tesla Leveraged ETFs (your #1 strategy by volume) ──
-    {"ticker": "TSLL", "type": "tsll_tslz"},
-    {"ticker": "TSLZ", "type": "tsll_tslz"},
-
-    # ── Crypto / Bitcoin ETFs ──
-    {"ticker": "IBIT", "type": "crypto"},
-    {"ticker": "BITI", "type": "crypto"},
-    {"ticker": "BTC-USD",  "type": "crypto"},
-    {"ticker": "ETH-USD",  "type": "crypto"},
-    {"ticker": "DOGE-USD", "type": "crypto"},
+    # parent='TSLA' — these are skipped automatically when TSLA is in the list
+    {"ticker": "TSLL", "type": "tsll_tslz", "parent": "TSLA"},
+    {"ticker": "TSLZ", "type": "tsll_tslz", "parent": "TSLA"},
 
     # ── Large Cap Stocks (your NFLX/BABA high-avg-win plays) ──
     {"ticker": "NFLX", "type": "stock"},
     {"ticker": "BABA", "type": "stock"},
     {"ticker": "AAPL", "type": "stock"},
     {"ticker": "NVDA", "type": "stock"},
-    {"ticker": "TSLA", "type": "stock"},   # underlying, not leveraged ETF
+    {"ticker": "TSLA", "type": "stock"},   # underlying — TSLL/TSLZ skipped when this is present
 
     # ── Add more tickers here ──
     # {"ticker": "AMZN", "type": "stock"},
     # {"ticker": "META", "type": "stock"},
-    # {"ticker": "UNI-USD", "type": "crypto"},
+    # {"ticker": "MSFT", "type": "stock"},
+    # {"ticker": "GOOGL", "type": "stock"},
 ]
 
 
