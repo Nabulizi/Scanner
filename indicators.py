@@ -11,6 +11,10 @@ Fetches 1H OHLCV data and computes:
 All thresholds match your pre-trade checklist logic.
 """
 
+import contextlib
+import io
+import logging
+
 import yfinance as yf
 import pandas as pd
 import ta
@@ -129,17 +133,39 @@ def fetch_ohlcv(ticker: str) -> pd.DataFrame:
 
 # ── Earnings calendar ─────────────────────────────────────────────────────────
 
+@contextlib.contextmanager
+def _suppress_yf_noise():
+    """
+    Suppress the HTTP error messages yfinance prints directly to stdout/stderr
+    before raising an exception — e.g. 404s for ETFs that have no fundamentals
+    endpoint (SPY, IBIT, etc.). Also silences the yfinance logger.
+    """
+    yf_log = logging.getLogger('yfinance')
+    prev_level = yf_log.level
+    yf_log.setLevel(logging.CRITICAL)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), \
+             contextlib.redirect_stderr(io.StringIO()):
+            yield
+    finally:
+        yf_log.setLevel(prev_level)
+
+
 def check_earnings_soon(ticker: str, window_hours: int = EARNINGS_WINDOW_H) -> bool:
     """
     Returns True if earnings fall within ±window_hours of today.
-    Silently returns False on any fetch error so a bad calendar
-    response never crashes the scan session.
+    Silently returns False on any fetch error — including 404s for ETFs and
+    leveraged funds that have no Yahoo Finance fundamentals endpoint.
     """
     if ticker.upper() in NO_EARNINGS_TICKERS:
         return False
 
     try:
-        cal   = yf.Ticker(ticker).calendar
+        with _suppress_yf_noise():
+            cal = yf.Ticker(ticker).calendar
+        # yfinance may return None instead of raising when the endpoint 404s
+        if not isinstance(cal, dict):
+            return False
         dates = cal.get("Earnings Date", [])
 
         if not dates:
@@ -233,19 +259,27 @@ def calc_stoch_rsi(df: pd.DataFrame) -> pd.DataFrame:
     df['stoch_d']      = stoch.stochrsi_d() * 100
     df['stoch_k_prev'] = df['stoch_k'].shift(1)
 
-    # Fix #2: a real cross means K *crosses through* the threshold, not just
-    # "K is below 20 and ticking up." The old definition fired continuously
-    # for every rising bar in oversold territory — a true cross is one bar.
-    # K > D adds momentum confirmation from the signal line.
+    # Fix #2 (revised): K/D crossover INSIDE the extreme zone.
+    #
+    # The original definition ("K below 20 and rising") fired continuously on
+    # every bar in oversold territory — not a cross, just prolonged oversold.
+    # The first revision ("K exits the 20 threshold") was a genuine one-bar
+    # event but fired too late: when K is at 92 and falling (META), the
+    # reversal signal is already clear while K is still overbought. Waiting
+    # for K to fall all the way to 80 misses most of the move.
+    #
+    # Correct definition: K crosses the D line while INSIDE the extreme zone.
+    # This is one bar (genuine cross), timely (fires at reversal, not at exit),
+    # and D-confirmed (momentum validation from the signal line).
     df['stoch_oversold_cross'] = (
-        (df['stoch_k_prev'] < STOCH_OVERSOLD) &   # was below 20
-        (df['stoch_k'] >= STOCH_OVERSOLD) &         # now at or above 20
-        (df['stoch_k'] > df['stoch_d'])             # K above D = momentum up
+        (df['stoch_k'] < STOCH_OVERSOLD) &             # K still in oversold zone
+        (df['stoch_k'] > df['stoch_d']) &              # K just crossed above D
+        (df['stoch_k_prev'] <= df['stoch_d'].shift(1)) # K was at or below D last bar
     )
     df['stoch_overbought_cross'] = (
-        (df['stoch_k_prev'] > STOCH_OVERBOUGHT) &  # was above 80
-        (df['stoch_k'] <= STOCH_OVERBOUGHT) &       # now at or below 80
-        (df['stoch_k'] < df['stoch_d'])             # K below D = momentum down
+        (df['stoch_k'] > STOCH_OVERBOUGHT) &            # K still in overbought zone
+        (df['stoch_k'] < df['stoch_d']) &               # K just crossed below D
+        (df['stoch_k_prev'] >= df['stoch_d'].shift(1))  # K was at or above D last bar
     )
     df['stoch_mid_range'] = (
         (df['stoch_k'] >= STOCH_MID_LOW) &

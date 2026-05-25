@@ -38,7 +38,9 @@ MIN_FVG_SIZE_PCT     = 0.0010  # 0.10% minimum — below this is bid/ask noise
 MIN_FVG_AGE_BARS     = 2       # gap must be ≥2 bars old so there is a fill-check period
 
 # ── Stochastic RSI parameters ─────────────────────────────────────────────────
-STOCH_CROSS_LOOKBACK = 3       # a confirmed cross remains actionable for this many bars
+STOCH_CROSS_LOOKBACK = 6       # bars; covers ~one full 1H trading session (9:30–15:30)
+                               # K/D crossover events are one-bar — this window ensures a
+                               # cross that happened earlier in the same session isn't missed
 
 # ── Bollinger Band expansion parameters ───────────────────────────────────────
 BB_EXPAND_LOOKBACK   = 20      # rolling-window baseline (was 5 — too noisy)
