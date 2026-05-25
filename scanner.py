@@ -2,13 +2,19 @@
 Luminous Path LLC — Pre-Trade Signal Scanner
 ============================================
 Usage:
-  python3 scanner.py              # full watchlist scan
-  python3 scanner.py --alerts     # only TAKE THE TRADE setups
+  python3 scanner.py                        # full watchlist scan
+  python3 scanner.py --alerts               # only TAKE THE TRADE setups
   python3 scanner.py --ticker TSLL
   python3 scanner.py --watchlist swing
-  python3 scanner.py --explain    # show blockers and score breakdown
-  python3 scanner.py --json       # machine-readable scan payload
-  python3 scanner.py --verbose    # detail for every ticker
+  python3 scanner.py --explain              # show blockers and score breakdown
+  python3 scanner.py --json                 # machine-readable scan payload
+  python3 scanner.py --verbose              # detail for every ticker
+
+  # Portfolio state — saves to portfolio.json between runs:
+  python3 scanner.py --positions 1 --deployed 9000
+  python3 scanner.py --fed                  # mark today as Fed/FOMC day
+  python3 scanner.py --catalyst             # mark Tesla catalyst active
+  python3 scanner.py --positions 0 --deployed 0   # reset after close
 """
 
 import argparse, json, os, sys
@@ -22,7 +28,8 @@ from rich.rule import Rule
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
 from rich import box
 
-from watchlist import WATCHLIST, PORTFOLIO_STATE, load_watchlist_file, resolve_watchlist_path, DEFAULT_WATCHLIST_FILE
+from watchlist import WATCHLIST, load_watchlist_file, resolve_watchlist_path, DEFAULT_WATCHLIST_FILE
+from portfolio import load_portfolio, save_portfolio
 from indicators import fetch_and_analyze
 from scoring import score_signals
 
@@ -364,7 +371,8 @@ def load_requested_watchlist(watchlist_name=None):
     return list(WATCHLIST), []
 
 
-def run_scan(tickers=None, alerts_only=False, verbose=False, explain=False, watchlist_name=None, output_json=False):
+def run_scan(tickers=None, alerts_only=False, verbose=False, explain=False, watchlist_name=None, output_json=False, portfolio=None, warnings=None):
+    portfolio = portfolio or {}
     watchlist_entries, file_skipped = load_requested_watchlist(watchlist_name)
     filtered_entries, skipped = build_scan_entries(
         tickers=tickers,
@@ -374,7 +382,11 @@ def run_scan(tickers=None, alerts_only=False, verbose=False, explain=False, watc
 
     if not output_json:
         print_header()
-        print_portfolio(PORTFOLIO_STATE)
+        for w in (warnings or []):
+            console.print(f"  [bold yellow]⚠  {w}[/bold yellow]")
+        if warnings:
+            console.print()
+        print_portfolio(portfolio)
 
     if skipped:
         for item in skipped:
@@ -392,7 +404,7 @@ def run_scan(tickers=None, alerts_only=False, verbose=False, explain=False, watc
             itype  = entry.get('type', 'stock')
             try:
                 signals = fetch_and_analyze(ticker)
-                result  = score_signals(ticker, signals, PORTFOLIO_STATE, itype)
+                result  = score_signals(ticker, signals, portfolio, itype)
                 result['price_data'] = signals.get('price_data')
                 results.append(result)
             except Exception as e:
@@ -417,7 +429,7 @@ def run_scan(tickers=None, alerts_only=False, verbose=False, explain=False, watc
                 progress.update(task, description=f"[dim]Fetching[/dim] [bold]{ticker}[/bold]")
                 try:
                     signals = fetch_and_analyze(ticker)
-                    result  = score_signals(ticker, signals, PORTFOLIO_STATE, itype)
+                    result  = score_signals(ticker, signals, portfolio, itype)
                     result['price_data'] = signals.get('price_data')
                     results.append(result)
                 except Exception as e:
@@ -483,7 +495,25 @@ def main():
     p.add_argument('--explain',   action='store_true', help='Show blockers and score breakdown')
     p.add_argument('--json',      action='store_true', help='Print machine-readable JSON')
     p.add_argument('--verbose',   action='store_true', help='Detail for every ticker')
+    # Portfolio state — saved to portfolio.json between runs
+    p.add_argument('--positions', type=int,   help='Current open positions (e.g. --positions 1)')
+    p.add_argument('--deployed',  type=float, help='Total capital deployed in $ (e.g. --deployed 9000)')
+    p.add_argument('--fed',       action='store_true', default=None, help='Mark today as Fed/FOMC day')
+    p.add_argument('--catalyst',  action='store_true', default=None, help='Mark Tesla catalyst active')
     args = p.parse_args()
+
+    # Build overrides only from flags that were explicitly set
+    overrides = {}
+    if args.positions is not None: overrides['open_positions']  = args.positions
+    if args.deployed  is not None: overrides['total_deployed']  = args.deployed
+    if args.fed:                   overrides['fed_day']         = True
+    if args.catalyst:              overrides['tesla_catalyst']  = True
+
+    portfolio, warnings = load_portfolio(overrides or None)
+
+    # Persist state when the user explicitly passed portfolio flags
+    if overrides:
+        save_portfolio(portfolio)
 
     tickers = [args.ticker.upper()] if args.ticker else None
     run_scan(
@@ -493,6 +523,8 @@ def main():
         explain=args.explain,
         watchlist_name=args.watchlist,
         output_json=args.json,
+        portfolio=portfolio,
+        warnings=warnings,
     )
 
 
