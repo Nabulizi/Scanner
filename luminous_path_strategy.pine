@@ -1,0 +1,237 @@
+// ============================================================================
+// Luminous Path — Pre-Trade Strategy Backtester  v2
+// ============================================================================
+// Mirrors the Python scanner logic exactly:
+//   • Fair Value Gap (FVG) detection — bullish + bearish, unfilled only
+//   • Bollinger Bands (20, 2σ) — wick touch (Low/High) + expansion filter
+//   • Stochastic RSI (14, 3, 3) — K/D cross from oversold/overbought
+//   • Daily trend filter — EMA20 / EMA50 alignment on daily timeframe
+//
+// Designed for: 1H chart
+// Long  entry: Bullish FVG + lower BB wick touch + Stoch oversold cross up
+// Short entry: Bearish FVG + upper BB wick touch + Stoch overbought cross down
+//
+// v2 fixes:
+//   • CRITICAL — Exit used wrong tick math: close * tp_pct / mintick * mintick
+//     simplifies to close * tp_pct (dollars, not ticks) → stop ~$0.04 from entry
+//     on every trade → 0/22 wins. Fixed: use limit/stop price levels from
+//     strategy.position_avg_price so exits are at the correct % distance.
+//   • Stoch cross required exact bar match — now uses 3-bar lookback window
+//     (ta.barssince) to match Python STOCH_CROSS_LOOKBACK behaviour
+//   • FVG fill detection was clearing gap on wrong price direction. Fixed:
+//     bullish FVG invalidated when close < bottom; bearish when close > top
+//   • Added barstate.isconfirmed guard — no trades on unconfirmed bars
+//   • Added lookahead_off to request.security to prevent future-leak in backtest
+// ============================================================================
+
+//@version=5
+strategy(
+     title             = "Luminous Path — FVG + BB + Stoch RSI",
+     shorttitle        = "LP Scanner",
+     overlay           = true,
+     default_qty_type  = strategy.percent_of_equity,
+     default_qty_value = 10,
+     commission_type   = strategy.commission.percent,
+     commission_value  = 0.05,
+     slippage          = 2,
+     pyramiding        = 0
+ )
+
+// ── Inputs ────────────────────────────────────────────────────────────────────
+
+grp_bb         = "Bollinger Bands"
+bb_len         = input.int(20,    "BB Period",             group=grp_bb)
+bb_std         = input.float(2.0, "BB Std Dev",            group=grp_bb)
+bb_buffer      = input.float(0.5, "BB Touch Buffer %",     group=grp_bb, step=0.1) / 100
+bb_expand      = input.float(1.15,"BB Expand Factor",      group=grp_bb, step=0.01)
+bb_exp_len     = input.int(20,    "BB Expand Lookback",    group=grp_bb)
+
+grp_st         = "Stochastic RSI"
+stoch_len      = input.int(14,    "Stoch RSI Length",      group=grp_st)
+smooth_k       = input.int(3,     "Smooth K",              group=grp_st)
+smooth_d       = input.int(3,     "Smooth D",              group=grp_st)
+oversold       = input.int(20,    "Oversold Level",        group=grp_st)
+overbought     = input.int(80,    "Overbought Level",      group=grp_st)
+mid_low        = input.int(40,    "Mid-range Low",         group=grp_st)
+mid_high       = input.int(60,    "Mid-range High",        group=grp_st)
+cross_lookback = input.int(3,     "Cross Lookback (bars)", group=grp_st,
+                 tooltip="Cross stays valid for N bars — matches Python STOCH_CROSS_LOOKBACK")
+
+grp_fvg        = "Fair Value Gap"
+fvg_appr       = input.float(2.0, "FVG Approach %",        group=grp_fvg, step=0.1) / 100
+fvg_min        = input.float(0.1, "Min FVG Size %",        group=grp_fvg, step=0.05) / 100
+fvg_age        = input.int(2,     "Min FVG Age (bars)",    group=grp_fvg)
+
+grp_trend      = "Daily Trend Filter"
+use_trend      = input.bool(true, "Enable daily EMA trend filter", group=grp_trend)
+ema_fast       = input.int(20,    "Fast EMA period",       group=grp_trend)
+ema_slow       = input.int(50,    "Slow EMA period",       group=grp_trend)
+
+grp_exit       = "Exit Rules"
+tp_pct         = input.float(2.5, "Profit Target %",       group=grp_exit, step=0.1) / 100
+sl_pct         = input.float(1.5, "Hard Stop %",           group=grp_exit, step=0.1) / 100
+
+// ── Bollinger Bands ───────────────────────────────────────────────────────────
+
+[bb_mid, bb_upper, bb_lower] = ta.bb(close, bb_len, bb_std)
+bb_width     = (bb_upper - bb_lower) / bb_mid
+bb_baseline  = ta.sma(bb_width, bb_exp_len)
+
+// Expanding = 2 consecutive bars above threshold (matches Python fix)
+bb_expanding = (bb_width    > bb_baseline    * bb_expand) and
+               (bb_width[1] > bb_baseline[1] * bb_expand)
+
+// Use wick extremes — a wick to the band that closes away is the strongest signal
+near_lower_bb = low  <= bb_lower * (1 + bb_buffer)
+near_upper_bb = high >= bb_upper * (1 - bb_buffer)
+
+// ── Stochastic RSI ────────────────────────────────────────────────────────────
+
+rsi_val   = ta.rsi(close, stoch_len)
+rsi_low   = ta.lowest(rsi_val, stoch_len)
+rsi_high  = ta.highest(rsi_val, stoch_len)
+rsi_range = rsi_high - rsi_low
+stoch_raw = rsi_range != 0 ? (rsi_val - rsi_low) / rsi_range * 100 : 0
+k         = ta.sma(stoch_raw, smooth_k)
+d         = ta.sma(k, smooth_d)
+
+stoch_mid_range = k >= mid_low and k <= mid_high
+
+// Cross events — K crosses D while in oversold / overbought zone
+os_cross_fired = ta.crossover(k, d)  and k[1] < oversold    // crossed up from oversold
+ob_cross_fired = ta.crossunder(k, d) and k[1] > overbought  // crossed down from overbought
+
+// 3-bar lookback window — cross stays valid for cross_lookback bars
+os_bars  = ta.barssince(os_cross_fired)
+ob_bars  = ta.barssince(ob_cross_fired)
+stoch_oversold_cross   = not na(os_bars) and os_bars  <= cross_lookback - 1
+stoch_overbought_cross = not na(ob_bars) and ob_bars  <= cross_lookback - 1
+
+// ── Daily Trend Filter ────────────────────────────────────────────────────────
+
+// lookahead_off prevents future data leak — essential for valid backtesting
+ema_fast_daily = request.security(syminfo.tickerid, "D",
+                 ta.ema(close, ema_fast), lookahead=barmerge.lookahead_off)
+ema_slow_daily = request.security(syminfo.tickerid, "D",
+                 ta.ema(close, ema_slow), lookahead=barmerge.lookahead_off)
+
+daily_bullish = not use_trend or ema_fast_daily > ema_slow_daily
+daily_bearish = not use_trend or ema_fast_daily < ema_slow_daily
+
+// ── Fair Value Gap Detection ──────────────────────────────────────────────────
+//
+// Bullish FVG: high[2] < low[0] — price gapped UP leaving imbalance below
+//   → long entry: price pulls back into zone, expect institutional buying
+//
+// Bearish FVG: low[2] > high[0] — price gapped DOWN leaving imbalance above
+//   → short entry: price bounces into zone, expect institutional selling
+//
+// v2 fill detection fix:
+//   Bullish FVG invalidated when close drops below the BOTTOM of the gap
+//   Bearish FVG invalidated when close rises above the TOP of the gap
+
+var float bull_fvg_top    = na
+var float bull_fvg_bottom = na
+var float bear_fvg_top    = na
+var float bear_fvg_bottom = na
+
+if barstate.isconfirmed
+    // New bullish FVG
+    if high[2] < low[0]
+        gap_bot  = high[2]
+        gap_top  = low[0]
+        gap_size = (gap_top - gap_bot) / gap_bot
+        if gap_size >= fvg_min and bar_index >= fvg_age
+            bull_fvg_bottom := gap_bot
+            bull_fvg_top    := gap_top
+
+    // New bearish FVG
+    if low[2] > high[0]
+        gap_bot  = high[0]
+        gap_top  = low[2]
+        gap_size = (gap_top - gap_bot) / gap_bot
+        if gap_size >= fvg_min and bar_index >= fvg_age
+            bear_fvg_bottom := gap_bot
+            bear_fvg_top    := gap_top
+
+    // v2 fix: invalidate on the correct direction
+    // Bullish gap: price closed below the entire gap — support broken
+    if not na(bull_fvg_bottom) and close < bull_fvg_bottom
+        bull_fvg_top    := na
+        bull_fvg_bottom := na
+
+    // Bearish gap: price closed above the entire gap — resistance broken
+    if not na(bear_fvg_top) and close > bear_fvg_top
+        bear_fvg_top    := na
+        bear_fvg_bottom := na
+
+// Price within approach% of the gap
+bull_fvg_active = not na(bull_fvg_top) and
+                  close >= bull_fvg_bottom * (1 - fvg_appr) and
+                  close <= bull_fvg_top    * (1 + fvg_appr)
+
+bear_fvg_active = not na(bear_fvg_bottom) and
+                  close >= bear_fvg_bottom * (1 - fvg_appr) and
+                  close <= bear_fvg_top    * (1 + fvg_appr)
+
+// ── Entry Conditions ──────────────────────────────────────────────────────────
+
+long_signal  = barstate.isconfirmed
+               and bull_fvg_active
+               and near_lower_bb
+               and not bb_expanding
+               and stoch_oversold_cross
+               and not stoch_mid_range
+               and daily_bullish
+
+short_signal = barstate.isconfirmed
+               and bear_fvg_active
+               and near_upper_bb
+               and not bb_expanding
+               and stoch_overbought_cross
+               and not stoch_mid_range
+               and daily_bearish
+
+// ── Execute Trades ────────────────────────────────────────────────────────────
+
+if long_signal and strategy.position_size == 0
+    strategy.entry("Long", strategy.long)
+
+if short_signal and strategy.position_size == 0
+    strategy.entry("Short", strategy.short)
+
+// v2 exit fix: use limit/stop PRICE LEVELS from actual avg entry price.
+// The original profit/loss tick formula: close * tp_pct / mintick * mintick
+// simplifies to close * tp_pct (dollars), which Pine reads as ticks (~$0.04).
+// That placed the stop within cents of entry — hit immediately every time.
+// Now exits are set at the correct percentage distance from the actual fill.
+
+if strategy.position_size > 0
+    strategy.exit("Long TP/SL", "Long",
+         limit = strategy.position_avg_price * (1 + tp_pct),
+         stop  = strategy.position_avg_price * (1 - sl_pct))
+
+if strategy.position_size < 0
+    strategy.exit("Short TP/SL", "Short",
+         limit = strategy.position_avg_price * (1 - tp_pct),
+         stop  = strategy.position_avg_price * (1 + sl_pct))
+
+// ── Visuals ───────────────────────────────────────────────────────────────────
+
+// Bollinger Bands
+plot(bb_upper, "BB Upper", color=color.new(color.blue, 70), linewidth=1)
+plot(bb_lower, "BB Lower", color=color.new(color.blue, 70), linewidth=1)
+plot(bb_mid,   "BB Mid",   color=color.new(color.blue, 85), linewidth=1)
+
+// FVG zones — background shading
+bgcolor(bull_fvg_active ? color.new(color.green, 90) : na, title="Bullish FVG zone")
+bgcolor(bear_fvg_active ? color.new(color.red,   90) : na, title="Bearish FVG zone")
+
+// Entry signal arrows
+plotshape(long_signal,  title="Long Signal",  style=shape.triangleup,
+          location=location.belowbar, color=color.green, size=size.small)
+plotshape(short_signal, title="Short Signal", style=shape.triangledown,
+          location=location.abovebar, color=color.red,   size=size.small)
+
+// BB expanding warning — orange bar tint
+barcolor(bb_expanding ? color.new(color.orange, 60) : na, title="BB Expanding")
