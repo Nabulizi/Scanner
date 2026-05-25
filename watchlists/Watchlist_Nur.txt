@@ -1,7 +1,6 @@
 # Imported from should-i-trade/watchlists/Watchlist_Nur.txt.
 # Keep this file comma- or newline-separated. TradingView symbols are supported.
 AMEX:SPY
-NASDAQ:NVDA
 NASDAQ:MSFT
 NASDAQ:AAPL
 NASDAQ:GOOGL
