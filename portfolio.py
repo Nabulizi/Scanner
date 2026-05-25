@@ -17,6 +17,8 @@ Usage from scanner.py:
     save_portfolio(portfolio)   # only called when CLI flags were provided
 """
 
+from __future__ import annotations
+
 import json
 import os
 from datetime import date
