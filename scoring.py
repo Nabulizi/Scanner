@@ -54,7 +54,7 @@ CHECK_LABELS = {
     'daily_checked':             'Daily chart checked',
     'initial_size_3k':           'Initial size confirmed',
     'max_avgdown_defined':       'Max average-down level defined',
-    'profit_target_2_3pct':      'Profit target confirmed',
+    'profit_target_2_3pct':      'Profit target confirmed (5% TP / 2.5% SL)',  # validated via Pine Script backtest
     'hard_stop_defined':         'Hard stop confirmed',
 }
 
