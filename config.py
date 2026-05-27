@@ -48,3 +48,9 @@ BB_EXPAND_LOOKBACK   = 20      # rolling-window baseline (was 5 — too noisy)
 # ── Daily trend filter ────────────────────────────────────────────────────────
 DAILY_EMA_FAST       = 20      # fast EMA period for daily trend detection
 DAILY_EMA_SLOW       = 50      # slow EMA period for daily trend detection
+
+# ── Direction filter ─────────────────────────────────────────────────────────
+# Backtest validated (Pine Script v3, 7-stock sweep, TP 5% / SL 2.5%):
+# Long-only PF > combined PF on all 7 stocks. Short signals actively hurt
+# performance. Set to True to suppress short-direction verdicts entirely.
+LONG_ONLY            = True

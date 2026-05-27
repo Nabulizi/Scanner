@@ -14,6 +14,7 @@ All thresholds match your pre-trade checklist logic.
 import contextlib
 import io
 import logging
+import time
 
 import yfinance as yf
 import pandas as pd
@@ -61,10 +62,15 @@ NO_EARNINGS_TICKERS = {"TSLL", "TSLZ"}
 
 # Fix #5: cache now stores (DataFrame, fetched_at) tuples so it can expire
 _OHLCV_CACHE: dict[str, tuple] = {}
+_DAILY_CACHE: dict[str, tuple] = {}
 
 
 def clear_ohlcv_cache():
     _OHLCV_CACHE.clear()
+
+
+def clear_daily_cache():
+    _DAILY_CACHE.clear()
 
 
 # ── Data fetcher ─────────────────────────────────────────────────────────────
@@ -85,7 +91,7 @@ def _drop_inprogress_bar(df: pd.DataFrame) -> pd.DataFrame:
         now = pd.Timestamp.now(tz=tz)
         if (now - last_ts) < pd.Timedelta('1h'):
             df = df.iloc[:-1]
-    except Exception:
+    except (TypeError, AttributeError, OverflowError):
         pass  # timezone comparison failed — keep all bars
     return df
 
@@ -105,13 +111,15 @@ def fetch_ohlcv(ticker: str) -> pd.DataFrame:
 
     last_error = None
     df = None
-    for _ in range(FETCH_RETRIES):
+    for attempt in range(FETCH_RETRIES):
         try:
             tk = yf.Ticker(ticker)
             df = tk.history(period=DATA_PERIOD, interval=DATA_INTERVAL)
             break
         except Exception as e:
             last_error = e
+            if attempt < FETCH_RETRIES - 1:
+                time.sleep(1.5 ** attempt)
 
     if df is None:
         raise ValueError(
@@ -172,7 +180,7 @@ def check_earnings_soon(ticker: str, window_hours: int = EARNINGS_WINDOW_H) -> b
             return False
 
         today       = date.today()
-        window_days = window_hours / 24
+        window_days = window_hours // 24
 
         for d in dates:
             if hasattr(d, 'date'):
@@ -188,6 +196,20 @@ def check_earnings_soon(ticker: str, window_hours: int = EARNINGS_WINDOW_H) -> b
 
 # ── Daily trend filter ────────────────────────────────────────────────────────
 
+def _compute_daily_trend(df: pd.DataFrame) -> tuple[bool, bool]:
+    """Compute (no_strong_downtrend, no_strong_uptrend) from a daily DataFrame."""
+    if len(df) < DAILY_EMA_SLOW:
+        return True, True
+    ema_fast = df['Close'].ewm(span=DAILY_EMA_FAST, adjust=False).mean()
+    ema_slow = df['Close'].ewm(span=DAILY_EMA_SLOW, adjust=False).mean()
+    close    = df['Close'].iloc[-1]
+    fast     = ema_fast.iloc[-1]
+    slow     = ema_slow.iloc[-1]
+    strong_down = close < fast < slow
+    strong_up   = close > fast > slow
+    return not strong_down, not strong_up
+
+
 def check_daily_trend(ticker: str) -> tuple[bool, bool]:
     """
     Fix #6: Compute the daily trend from EMA alignment instead of defaulting True.
@@ -199,19 +221,22 @@ def check_daily_trend(ticker: str) -> tuple[bool, bool]:
     Returns (no_strong_downtrend, no_strong_uptrend).
     Fails safe — returns (True, True) on any error or insufficient data so
     a bad calendar or network failure never incorrectly blocks a trade.
+
+    Daily data is cached with the same TTL as 1H data to avoid doubling
+    the number of network requests per scan.
     """
+    cache_key = ticker.upper()
+    now = datetime.now()
+
+    if cache_key in _DAILY_CACHE:
+        df, fetched_at = _DAILY_CACHE[cache_key]
+        if (now - fetched_at).total_seconds() < CACHE_TTL_SECONDS:
+            return _compute_daily_trend(df)
+
     try:
         df = yf.Ticker(ticker).history(period="60d", interval="1d").dropna()
-        if len(df) < DAILY_EMA_SLOW:
-            return True, True  # insufficient history — don't block
-        ema_fast = df['Close'].ewm(span=DAILY_EMA_FAST, adjust=False).mean()
-        ema_slow = df['Close'].ewm(span=DAILY_EMA_SLOW, adjust=False).mean()
-        close    = df['Close'].iloc[-1]
-        fast     = ema_fast.iloc[-1]
-        slow     = ema_slow.iloc[-1]
-        strong_down = close < fast < slow   # bearish EMA stack
-        strong_up   = close > fast > slow   # bullish EMA stack
-        return not strong_down, not strong_up
+        _DAILY_CACHE[cache_key] = (df.copy(), now)
+        return _compute_daily_trend(df)
     except Exception:
         return True, True
 
@@ -306,7 +331,12 @@ def detect_fvg(df: pd.DataFrame, lookback: int = FVG_LOOKBACK) -> dict:
     recent  = df.iloc[-lookback:]
     current_price = df['Close'].iloc[-1]
 
-    for i in range(2, len(recent)):
+    found_bullish = False
+    found_bearish = False
+    for i in range(len(recent) - 1, 1, -1):
+        if found_bullish and found_bearish:
+            break
+
         # Fix #12: require minimum age so the gap has a confirmed fill-check period
         bar_age = (len(recent) - 1) - i   # 0 = most recent bar
         if bar_age < MIN_FVG_AGE_BARS:
@@ -318,48 +348,46 @@ def detect_fvg(df: pd.DataFrame, lookback: int = FVG_LOOKBACK) -> dict:
         h_i = recent['High'].iloc[i]
 
         # ── Bullish FVG ──────────────────────────────────────────────────────
-        if h_2 < l_i:
+        if not found_bullish and h_2 < l_i:
             gap_bottom   = h_2
             gap_top      = l_i
             gap_size_pct = (gap_top - gap_bottom) / gap_bottom
 
             # Fix #8: skip noise gaps
-            if gap_size_pct < MIN_FVG_SIZE_PCT:
-                continue
-
-            subsequent = recent.iloc[i + 1:]
-            gap_filled = len(subsequent) > 0 and (subsequent['Low'] <= gap_bottom).any()
-            if not gap_filled:
-                if gap_bottom * (1 - FVG_APPROACH_PCT) <= current_price <= gap_top * (1 + FVG_APPROACH_PCT):
-                    results['bullish'] = {
-                        'gap_bottom':   round(float(gap_bottom), 4),
-                        'gap_top':      round(float(gap_top), 4),
-                        'price_inside': bool(gap_bottom <= current_price <= gap_top),
-                        'gap_size_pct': round(gap_size_pct * 100, 3),
-                        'bar_age':      bar_age,  # Fix #9
-                    }
+            if gap_size_pct >= MIN_FVG_SIZE_PCT:
+                subsequent = recent.iloc[i + 1:]
+                gap_filled = len(subsequent) > 0 and (subsequent['Low'] <= gap_bottom).any()
+                if not gap_filled:
+                    if gap_bottom * (1 - FVG_APPROACH_PCT) <= current_price <= gap_top * (1 + FVG_APPROACH_PCT):
+                        results['bullish'] = {
+                            'gap_bottom':   round(float(gap_bottom), 4),
+                            'gap_top':      round(float(gap_top), 4),
+                            'price_inside': bool(gap_bottom <= current_price <= gap_top),
+                            'gap_size_pct': round(gap_size_pct * 100, 3),
+                            'bar_age':      bar_age,  # Fix #9
+                        }
+                        found_bullish = True
 
         # ── Bearish FVG ──────────────────────────────────────────────────────
-        if l_2 > h_i:
+        if not found_bearish and l_2 > h_i:
             gap_bottom   = h_i
             gap_top      = l_2
             gap_size_pct = (gap_top - gap_bottom) / gap_bottom
 
             # Fix #8: skip noise gaps
-            if gap_size_pct < MIN_FVG_SIZE_PCT:
-                continue
-
-            subsequent = recent.iloc[i + 1:]
-            gap_filled = len(subsequent) > 0 and (subsequent['High'] >= gap_top).any()
-            if not gap_filled:
-                if gap_bottom * (1 - FVG_APPROACH_PCT) <= current_price <= gap_top * (1 + FVG_APPROACH_PCT):
-                    results['bearish'] = {
-                        'gap_bottom':   round(float(gap_bottom), 4),
-                        'gap_top':      round(float(gap_top), 4),
-                        'price_inside': bool(gap_bottom <= current_price <= gap_top),
-                        'gap_size_pct': round(gap_size_pct * 100, 3),
-                        'bar_age':      bar_age,  # Fix #9
-                    }
+            if gap_size_pct >= MIN_FVG_SIZE_PCT:
+                subsequent = recent.iloc[i + 1:]
+                gap_filled = len(subsequent) > 0 and (subsequent['High'] >= gap_top).any()
+                if not gap_filled:
+                    if gap_bottom * (1 - FVG_APPROACH_PCT) <= current_price <= gap_top * (1 + FVG_APPROACH_PCT):
+                        results['bearish'] = {
+                            'gap_bottom':   round(float(gap_bottom), 4),
+                            'gap_top':      round(float(gap_top), 4),
+                            'price_inside': bool(gap_bottom <= current_price <= gap_top),
+                            'gap_size_pct': round(gap_size_pct * 100, 3),
+                            'bar_age':      bar_age,  # Fix #9
+                        }
+                        found_bearish = True
 
     return results
 

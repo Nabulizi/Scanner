@@ -20,7 +20,7 @@ Verdict logic:
     🚫 SKIP TRADE      — all other cases
 """
 
-from config import DEFAULT_RULES, REDUCE_THRESHOLD, RISK_GATES, TAKE_THRESHOLD
+from config import DEFAULT_RULES, LONG_ONLY, REDUCE_THRESHOLD, RISK_GATES, TAKE_THRESHOLD
 from models import ScoreResult, SignalResult
 
 
@@ -144,7 +144,8 @@ def score_signals(ticker, signals: SignalResult, portfolio, instrument_type='sto
     checks['final_stoch'] = checks['stoch_confirmed'] and checks['stoch_not_mid_range']
     checks['final_bias']  = (
         checks['no_strong_downtrend'] if direction == 'long'
-        else checks['no_strong_uptrend']
+        else checks['no_strong_uptrend'] if direction == 'short'
+        else True   # neutral: bias gate is irrelevant (direction already SKIPs)
     )
     checks['final_no_news'] = (
         checks['no_earnings_24h'] and checks['no_fed_today'] and checks['no_tesla_news']
@@ -214,6 +215,9 @@ def score_signals(ticker, signals: SignalResult, portfolio, instrument_type='sto
     # Fix #11: neutral direction = no dominant signal = no trade
     elif direction == 'neutral':
         verdict = "SKIP"
+    # Long-only mode: suppress short-direction trades (backtest validated)
+    elif LONG_ONLY and direction == 'short':
+        verdict = "SKIP"
     elif core_count == 3 and score >= TAKE_THRESHOLD:
         verdict = "TAKE"
     elif core_count >= 2 and score >= REDUCE_THRESHOLD:
@@ -224,6 +228,8 @@ def score_signals(ticker, signals: SignalResult, portfolio, instrument_type='sto
     setup_reasons = []
     if direction == 'neutral':
         setup_reasons.append('Direction unclear — no dominant long or short signal')
+    if LONG_ONLY and direction == 'short':
+        setup_reasons.append('Short direction suppressed — long-only mode active')
     if not has_fvg:
         setup_reasons.append('FVG missing or direction-mismatched')
     if not has_bb:
@@ -233,10 +239,11 @@ def score_signals(ticker, signals: SignalResult, portfolio, instrument_type='sto
 
     blocker_reasons = hard_blockers or setup_reasons
 
-    # Include both scored checks and gate checks in the display list
+    # Only scored checks — count matches result['total'] (20)
+    # Gate failures are already surfaced in hard_blockers
     check_reasons = [
         {'key': key, 'passed': bool(value), 'label': CHECK_LABELS.get(key, key)}
-        for key, value in {**checks, **gates}.items()
+        for key, value in checks.items()
     ]
 
     return {

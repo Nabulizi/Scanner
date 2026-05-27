@@ -85,7 +85,7 @@ class ScoreSignalsTest(unittest.TestCase):
 
         self.assertEqual(result['score_sections']['core_setup'], '3/3')
         self.assertEqual(result['score_sections']['risk_gates'], '6/6')
-        self.assertEqual(result['score_sections']['checklist'], '25/25')
+        self.assertEqual(result['score_sections']['checklist'], '20/20')
 
     def test_clean_trade_has_no_blockers_and_has_reason_for_each_check(self):
         result = score_signals('TEST', clean_long_signals(), clean_portfolio())

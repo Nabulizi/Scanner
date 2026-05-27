@@ -24,17 +24,17 @@ def fake_signals(ticker):
 
 class ScannerCliTest(unittest.TestCase):
     def test_run_scan_json_outputs_payload(self):
-        original_watchlist = scanner.WATCHLIST
         original_fetch = scanner.fetch_and_analyze
-        scanner.WATCHLIST = [{'ticker': 'AAPL', 'type': 'stock'}]
+        original_loader = scanner.load_requested_watchlist
         scanner.fetch_and_analyze = fake_signals
+        scanner.load_requested_watchlist = lambda name=None: ([{'ticker': 'AAPL', 'type': 'stock'}], [])
         out = io.StringIO()
         try:
             with redirect_stdout(out):
                 payload = scanner.run_scan(output_json=True)
         finally:
-            scanner.WATCHLIST = original_watchlist
             scanner.fetch_and_analyze = original_fetch
+            scanner.load_requested_watchlist = original_loader
 
         printed = json.loads(out.getvalue())
         self.assertEqual(payload['results'][0]['ticker'], 'AAPL')

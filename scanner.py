@@ -17,7 +17,7 @@ Usage:
   python3 scanner.py --positions 0 --deployed 0   # reset after close
 """
 
-import argparse, json, os, sys
+import argparse, json, os
 from datetime import datetime
 from rich.console import Console, Group
 from rich.table import Table
@@ -136,7 +136,7 @@ def print_results_table(results):
     t.add_column("WHY",     min_width=20, ratio=1, overflow="ellipsis", no_wrap=True)
 
     for r in results:
-        pd     = r.get('price_data') or {}
+        price  = r.get('price_data') or {}
         vstyle, vlabel = VERDICT_STYLE.get(r['verdict'], ("white", r['verdict']))
         dstyle, dlabel = DIR_STYLE.get(r['direction'], ("white", r['direction'].upper()))
 
@@ -149,7 +149,7 @@ def print_results_table(results):
         elif score_pct >= 0.50: score_style = "yellow"
         else:                   score_style = "red"
 
-        close_str = f"${pd.get('close', 0):.4f}" if pd.get('close') else "—"
+        close_str = f"${price.get('close', 0):.4f}" if price.get('close') else "—"
 
         t.add_row(
             r['ticker'],
@@ -170,7 +170,7 @@ def print_results_table(results):
 
 def print_detail(r, show_all_checks=False):
     c        = r['checks']
-    pd       = r.get('price_data') or {}
+    price    = r.get('price_data') or {}
     vstyle, vlabel = VERDICT_STYLE.get(r['verdict'], ("white", r['verdict']))
     dstyle, dlabel = DIR_STYLE.get(r['direction'], ("white", r['direction'].upper()))
     fvg      = r.get('fvg_detail', {})
@@ -277,10 +277,10 @@ def print_detail(r, show_all_checks=False):
     price_row = Table.grid(padding=(0, 4))
     price_row.add_column(); price_row.add_column(); price_row.add_column(); price_row.add_column()
     price_row.add_row(
-        f"[dim]Price[/dim]  [bold]${pd.get('close', 0):.4f}[/bold]",
-        f"[dim]BB lower[/dim]  [cyan]{pd.get('bb_lower', 0):.4f}[/cyan]",
-        f"[dim]BB upper[/dim]  [cyan]{pd.get('bb_upper', 0):.4f}[/cyan]",
-        f"[dim]Stoch K[/dim]  [bold]{pd.get('stoch_k', 0):.1f}[/bold]",
+        f"[dim]Price[/dim]  [bold]${price.get('close', 0):.4f}[/bold]",
+        f"[dim]BB lower[/dim]  [cyan]{price.get('bb_lower', 0):.4f}[/cyan]",
+        f"[dim]BB upper[/dim]  [cyan]{price.get('bb_upper', 0):.4f}[/cyan]",
+        f"[dim]Stoch K[/dim]  [bold]{price.get('stoch_k', 0):.1f}[/bold]",
     )
 
     # Fix 1: everything inside one Panel via Group — no more floating content below the box
@@ -340,8 +340,11 @@ def build_scan_entries(tickers=None, watchlist_entries=None, file_skipped=None):
     file_skipped = file_skipped or []
     if tickers:
         base = watchlist_entries if watchlist_entries is not None else WATCHLIST
-        scan_entries = [w for w in base if w['ticker'] in tickers] or \
-                       [{'ticker': t, 'type': 'stock'} for t in tickers]
+        base_by_ticker = {w['ticker']: w for w in base}
+        scan_entries = [
+            base_by_ticker.get(t, {'ticker': t, 'type': 'stock'})
+            for t in tickers
+        ]
     else:
         scan_entries = list(watchlist_entries if watchlist_entries is not None else WATCHLIST)
 
@@ -498,16 +501,18 @@ def main():
     # Portfolio state — saved to portfolio.json between runs
     p.add_argument('--positions', type=int,   help='Current open positions (e.g. --positions 1)')
     p.add_argument('--deployed',  type=float, help='Total capital deployed in $ (e.g. --deployed 9000)')
-    p.add_argument('--fed',       action='store_true', default=None, help='Mark today as Fed/FOMC day')
-    p.add_argument('--catalyst',  action='store_true', default=None, help='Mark Tesla catalyst active')
+    p.add_argument('--fed',       action=argparse.BooleanOptionalAction, default=None,
+                   help='Mark today as Fed/FOMC day (--no-fed to clear)')
+    p.add_argument('--catalyst',  action=argparse.BooleanOptionalAction, default=None,
+                   help='Mark Tesla catalyst active (--no-catalyst to clear)')
     args = p.parse_args()
 
     # Build overrides only from flags that were explicitly set
     overrides = {}
     if args.positions is not None: overrides['open_positions']  = args.positions
     if args.deployed  is not None: overrides['total_deployed']  = args.deployed
-    if args.fed:                   overrides['fed_day']         = True
-    if args.catalyst:              overrides['tesla_catalyst']  = True
+    if args.fed       is not None: overrides['fed_day']         = args.fed
+    if args.catalyst  is not None: overrides['tesla_catalyst']  = args.catalyst
 
     portfolio, warnings = load_portfolio(overrides or None)
 

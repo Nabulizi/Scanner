@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from datetime import date
 
 PORTFOLIO_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'portfolio.json')
@@ -144,5 +145,5 @@ def save_portfolio(state: dict) -> None:
     try:
         with open(PORTFOLIO_FILE, 'w') as f:
             json.dump(payload, f, indent=2)
-    except OSError:
-        pass   # non-fatal — scanner still runs with the in-memory state
+    except OSError as e:
+        print(f"Warning: could not save portfolio state ({e})", file=sys.stderr)
